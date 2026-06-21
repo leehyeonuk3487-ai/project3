@@ -1,0 +1,14 @@
+# Core data stack (slice 1)
+pandas>=2.0
+numpy>=1.24
+
+# Modeling (slice 2-3)
+statsmodels>=0.14      # Poisson/NB ecological regression
+scikit-learn>=1.3      # stratification helpers, calibration metrics
+
+# API + dashboard (slice 3)
+fastapi>=0.110
+uvicorn[standard]>=0.27
+
+# Optimization (slice 2)
+scipy>=1.11

@@ -2,3 +2,12 @@
 data/raw/knhanes/
 data/raw/chs/
 *.zip
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Generated outputs (reproducible from code + committed data)
+outputs/
