@@ -59,31 +59,45 @@ src/
 │   ├── encoding.py      # 인코딩 자동 판별(utf-8-sig/utf-8/cp949)
 │   ├── reshape.py       # KDCA/KOSIS 2중헤더 와이드 피벗 → long 변환
 │   └── loaders.py       # CHS/KNHANES 개인 + KDCA 발생률 로더(BMI 파생 포함)
-└── models/
-    └── rates.py         # 보장항목별 성×연령×시도 발생률 surface
+├── data/
+│   ├── aggregate.py     # CHS 개인 → 지역/셀별 가중 위험요인 유병률
+│   └── benefits.py      # 지자체 급부 스케줄(보고서 → 구조화)
+├── models/
+│   ├── rates.py         # 보장항목별 성×연령×시도 발생률 surface(+치명률·장해율 분해)
+│   ├── ecological.py    # 지역 위험요인 ↔ 발생률 생태학적 포아송 회귀
+│   └── stratify.py      # 집단 리스크 층화(저/중/고) + IRR + 층별 프로파일
+└── optimize/
+    └── budget.py        # 기대 청구액·권장 보험료·예산 제약 보장배분
 scripts/
-└── run_slice1.py        # end-to-end 실행 → outputs/conscript_rate_table.csv
+├── run_slice1.py        # 발생률 표 → outputs/conscript_rate_table.csv
+└── run_slice2.py        # 생태회귀 + 층화 + 예산 최적화
+tests/test_pipeline.py   # 실데이터 smoke 테스트
 ```
 
 ## 실행
 
 ```bash
 pip install -r requirements.txt
-python -m scripts.run_slice1
+python -m scripts.run_slice1     # 보장항목별 시도 발생률
+python -m scripts.run_slice2     # 생태회귀 · 층화 · 예산 최적화
+python -m tests.test_pipeline    # smoke 테스트
 ```
 
-현역 청년(20대 남성)의 보장항목별 시도 발생률 표와 지역 격차 요약이 출력되고
-`outputs/conscript_rate_table.csv` 로 저장된다. 지역 격차는 최대 3.2배로,
-지역 보정의 실효성을 뒷받침한다.
+주요 산출(실데이터 기준):
+- 보장항목별 시도 발생률 — **지역 격차 최대 3.2배**.
+- 생태학적 포아송 회귀 — 흡연 유병률↑ 지역에서 중증외상 발생률↑(SD당 IRR 1.40,
+  p<0.01); 17개 시도뿐이라 흡연만 robust, 나머지는 참고치.
+- 집단 리스크 층화 — 고/저 **IRR 3.95**, 고위험 층의 흡연·비만 유병률이 더 높음.
+- 예산 최적화 — 경기도 1인당 기대청구액 약 1.8만원(핵심 4개 항목 하한),
+  예산 제약 시 사망>후유장해>골절>입원 우선순위로 보장 배분.
 
 ---
 
 ## 로드맵
 
 - **slice 1 (완료)** — 데이터 로딩/정제 + 보장항목별 기준 발생률 surface.
-- **slice 2** — CHS 위험요인 ↔ KDCA 발생률 **생태학적 포아송 회귀**로 상대위험
-  추정 → 개인 리스크 **층화(저/중/고)** + 구간 IRR. 치명률·장해율 분율을 결합해
-  상해사망·후유장해 분해. 지자체 급부표 구조화 + 예산 최적화.
+- **slice 2 (완료)** — 생태학적 포아송 회귀 + 집단 층화/IRR + 치명률·장해율
+  분해 + 급부표 구조화 + 예산 최적화.
 - **slice 3** — LORO(leave-one-region-out) 캘리브레이션 검증 리포트 +
   FastAPI + 단일 HTML 대시보드.
 

@@ -107,6 +107,43 @@ def severe_trauma_surface() -> pd.DataFrame:
     return surf
 
 
+def _region_share_map(df: pd.DataFrame) -> dict:
+    """시도별 분율(%) → {sido: fraction} (최근연도)."""
+    year = _latest_year(df)
+    sub = df[(df["metric"].str.contains(_SHARE_METRIC, na=False)) & (df["year"] == year)]
+    return {row["sido"]: row["value"] / 100.0 for _, row in sub.iterrows()
+            if row["sido"] != "전국"}
+
+
+def severe_trauma_outcome_surface(outcome: str) -> pd.DataFrame:
+    """중증외상 발생률 × 지역별 결과분율 = 상해사망/후유장해 surface.
+
+    outcome: 'fatality' | 'disability' | 'severe_disability'
+    분율은 시도 차원만 있으므로 발생률 surface에 시도별로 곱한다.
+    전국 분율을 fallback으로 사용한다.
+    """
+    base = severe_trauma_surface()
+    loader = {
+        "fatality": loaders.load_trauma_fatality_share,
+        "disability": loaders.load_trauma_disability_share,
+        "severe_disability": loaders.load_trauma_severe_disability_share,
+    }[outcome]
+    share_df = loader()
+    shares = _region_share_map(share_df)
+    national = share_df[
+        (share_df["dim"] == "전국")
+        & share_df["metric"].str.contains(_SHARE_METRIC, na=False)
+    ]["value"]
+    national_share = float(national.iloc[-1]) / 100.0 if len(national) else float("nan")
+
+    out = base.copy()
+    out["share"] = out["sido"].map(shares).fillna(national_share)
+    out["rate_per_100k"] = out["rate_per_100k"] * out["share"]
+    out["rate_per_1000py"] = out["rate_per_100k"] / 100.0
+    out["source"] = f"kdca_severe_trauma_{outcome}"
+    return out.drop(columns=["share"])
+
+
 def nontrauma_surface() -> pd.DataFrame:
     """비외상 중증질환 발생률 기반 surface."""
     df = loaders.load_nontrauma_incidence()
@@ -198,6 +235,10 @@ def coverage_rate_surface(item: str) -> pd.DataFrame:
     src = config.COVERAGE_ITEMS[item]["source"]
     if src == "severe_trauma":
         surf = severe_trauma_surface()
+    elif src == "severe_trauma_fatality":
+        surf = severe_trauma_outcome_surface("fatality")
+    elif src == "severe_trauma_disability":
+        surf = severe_trauma_outcome_surface("disability")
     elif src == "nontrauma":
         surf = nontrauma_surface()
     elif src == "discharge_injury":

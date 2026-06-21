@@ -85,15 +85,24 @@ CONSCRIPT_KDCA_AGE_BAND = "20-29세"
 #
 #   [slice 1 범위] 직접 관측되는 '기준 발생률 surface'만 산출한다:
 #     - 중증외상 발생, 비외상 중증질환 발생, 골절, 손상 입원
-#   [slice 2 예정] 상해사망/후유장해는 위 발생률 × 지역별 치명률·장해율
+#   [slice 2] 상해사망/후유장해를 중증외상 발생률 × 지역별 치명률·장해율
 #     (trauma_fatality_by_region / trauma_disability_by_region의 분율)로 분해.
-#     질병사망은 KOSIS 사망원인표로 별도 추정. 분율의 정확한 정의(치명률 vs
-#     구성비)를 검증한 뒤 결합한다.
+#     분율 = 결과건수/발생건수 (사망 4467/발생 8170 = 54.7%)임을 검증함.
 # ---------------------------------------------------------------------------
 COVERAGE_ITEMS = {
     "severe_trauma": {
         "label": "중증외상 발생",
         "source": "severe_trauma",          # KDCA 중증외상 발생률
+        "unit": "per_100k",
+    },
+    "death_injury": {
+        "label": "상해사망",
+        "source": "severe_trauma_fatality",  # 발생률 × 치명률(시도)
+        "unit": "per_100k",
+    },
+    "disability": {
+        "label": "후유장해",
+        "source": "severe_trauma_disability",  # 발생률 × 장해율(시도)
         "unit": "per_100k",
     },
     "nontrauma_severe": {

@@ -101,3 +101,31 @@ def load_discharge_count_by_injury_type() -> pd.DataFrame:
     return read_wide_pivot(
         config.DISCHARGE_DIR / "discharge_count_by_injury_type.csv"
     )
+
+
+# ---------------------------------------------------------------------------
+# 중증외상 결과 분율(시도별) — 치명률·장해율
+#   '분율 (%)' = 해당 결과 건수 / 중증외상 발생 건수 (예: 사망 4467 / 발생 8170 = 54.7%).
+#   시도명은 정식명칭("서울특별시")이므로 단축명으로 정규화한다.
+#   시도 차원만 있으므로 read_wide_pivot(n_id_cols=1)로 읽는다.
+# ---------------------------------------------------------------------------
+
+def _load_region_share(filename: str, directory) -> pd.DataFrame:
+    df = read_wide_pivot(directory / filename, n_id_cols=1)
+    df["sido"] = df["dim"].map(config.KOSIS_SIDO_ALIASES).fillna(df["dim"])
+    return df
+
+
+def load_trauma_fatality_share() -> pd.DataFrame:
+    """중증외상 치명률(시도별)."""
+    return _load_region_share("trauma_fatality_by_region.csv", config.TRAUMA_DIR)
+
+
+def load_trauma_disability_share() -> pd.DataFrame:
+    """중증외상 장해율(시도별)."""
+    return _load_region_share("trauma_disability_by_region.csv", config.TRAUMA_DIR)
+
+
+def load_trauma_severe_disability_share() -> pd.DataFrame:
+    """중증외상 중증장해율(시도별)."""
+    return _load_region_share("trauma_severe_disability_by_region.csv", config.TRAUMA_DIR)
