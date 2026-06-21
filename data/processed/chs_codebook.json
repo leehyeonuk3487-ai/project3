@@ -1,0 +1,66 @@
+{
+  "age": {
+    "variable": "age",
+    "label": "만나이"
+  },
+  "sex": {
+    "variable": "sex",
+    "label": "성별"
+  },
+  "ctprvn_code": {
+    "variable": "ctprvn_code",
+    "label": "시도번호"
+  },
+  "signgu_code": {
+    "variable": "signgu_code",
+    "label": "행정기관코드"
+  },
+  "sma_03z2": {
+    "variable": "sma_03z2",
+    "label": "일반담배(궐련) 현재흡연 여부"
+  },
+  "drb_01z3": {
+    "variable": "drb_01z3",
+    "label": "연간 음주 빈도"
+  },
+  "drb_04z1": {
+    "variable": "drb_04z1",
+    "label": "월간 폭음 경험_남"
+  },
+  "pha_04z1": {
+    "variable": "pha_04z1",
+    "label": "격렬한 신체활동 일수"
+  },
+  "pha_07z1": {
+    "variable": "pha_07z1",
+    "label": "중등도 신체활동 일수"
+  },
+  "phb_01z1": {
+    "variable": "phb_01z1",
+    "label": "걷기 실천 일수"
+  },
+  "hya_04z1": {
+    "variable": "hya_04z1",
+    "label": "고혈압 진단 경험 여부"
+  },
+  "dia_04z1": {
+    "variable": "dia_04z1",
+    "label": "당뇨병 진단 경험 여부"
+  },
+  "oba_02z1": {
+    "variable": "oba_02z1",
+    "label": "키"
+  },
+  "oba_03z1": {
+    "variable": "oba_03z1",
+    "label": "몸무게"
+  },
+  "wt_h": {
+    "variable": "wt_h",
+    "label": "가구가중치"
+  },
+  "wt_p": {
+    "variable": "wt_p",
+    "label": "개인가중치"
+  }
+}

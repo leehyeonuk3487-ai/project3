@@ -1,0 +1,4 @@
+.env
+data/raw/knhanes/
+data/raw/chs/
+*.zip

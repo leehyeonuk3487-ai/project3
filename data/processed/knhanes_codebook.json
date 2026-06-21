@@ -1,0 +1,90 @@
+{
+  "age": {
+    "variable": "age",
+    "label": "만나이"
+  },
+  "sex": {
+    "variable": "sex",
+    "label": "성별"
+  },
+  "region": {
+    "variable": "region",
+    "label": "시도"
+  },
+  "BS3_1": {
+    "variable": "BS3_1",
+    "label": "(성인) 현재 일반담배(궐련) 흡연 여부"
+  },
+  "sm_presnt": {
+    "variable": "sm_presnt",
+    "label": "현재흡연율"
+  },
+  "BD1_11": {
+    "variable": "BD1_11",
+    "label": "(만12세이상) 1년간 음주빈도"
+  },
+  "dr_month": {
+    "variable": "dr_month",
+    "label": "월간음주율"
+  },
+  "BE3_71": {
+    "variable": "BE3_71",
+    "label": "고강도 신체활동 여부: 일"
+  },
+  "BE3_81": {
+    "variable": "BE3_81",
+    "label": "중강도 신체활동 여부: 일"
+  },
+  "BE3_31": {
+    "variable": "BE3_31",
+    "label": "1주일간 걷기 일수"
+  },
+  "pa_aerobic": {
+    "variable": "pa_aerobic",
+    "label": "유산소 신체활동 실천율"
+  },
+  "DI1_dg": {
+    "variable": "DI1_dg",
+    "label": "고혈압 의사진단 여부"
+  },
+  "DI1_pr": {
+    "variable": "DI1_pr",
+    "label": "고혈압 현재 유병 여부"
+  },
+  "DE1_dg": {
+    "variable": "DE1_dg",
+    "label": "당뇨병 의사진단 여부"
+  },
+  "DE1_pr": {
+    "variable": "DE1_pr",
+    "label": "당뇨병 현재 유병 여부"
+  },
+  "HE_ht": {
+    "variable": "HE_ht",
+    "label": "신장"
+  },
+  "HE_wt": {
+    "variable": "HE_wt",
+    "label": "체중"
+  },
+  "HE_BMI": {
+    "variable": "HE_BMI",
+    "label": "체질량지수"
+  },
+  "HE_sbp": {
+    "variable": "HE_sbp",
+    "label": "최종 수축기 혈압(2,3차 평균)"
+  },
+  "HE_dbp": {
+    "variable": "HE_dbp",
+    "label": "최종 이완기 혈압(2,3차 평균)"
+  },
+  "wt_hs": {
+    "variable": "wt_hs",
+    "label": "가구조사 가중치"
+  },
+  "wt_itvex": {
+    "variable": "wt_itvex",
+    "label": "건강설문,검진조사 가중치"
+  }
+}
