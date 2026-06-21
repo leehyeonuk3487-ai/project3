@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>군복무 청년 상해보험 — 리스크·계리 대시보드</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root { --bg:#0f1720; --card:#18222e; --ink:#e8eef4; --muted:#9fb0c0; --accent:#4da3ff; --warn:#ffcc66; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+         background:var(--bg); color:var(--ink); line-height:1.5; }
+  header { padding:20px 28px; border-bottom:1px solid #243240; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .note { color:var(--warn); font-size:12.5px; background:#2a2410; border:1px solid #463b15;
+          padding:8px 12px; border-radius:8px; margin-top:10px; }
+  main { display:grid; grid-template-columns: repeat(2, 1fr); gap:16px; padding:20px 28px; max-width:1200px; }
+  .card { background:var(--card); border:1px solid #243240; border-radius:12px; padding:16px 18px; }
+  .card.full { grid-column: 1 / -1; }
+  h2 { font-size:15px; margin:0 0 10px; color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:right; padding:5px 8px; border-bottom:1px solid #223040; }
+  th:first-child, td:first-child { text-align:left; }
+  th { color:var(--muted); font-weight:600; }
+  .metric { display:flex; gap:18px; flex-wrap:wrap; margin:6px 0 12px; }
+  .metric div { background:#11202c; border:1px solid #223040; border-radius:8px; padding:8px 12px; }
+  .metric b { font-size:18px; color:var(--accent); }
+  .metric span { display:block; color:var(--muted); font-size:11.5px; }
+  label { font-size:13px; color:var(--muted); }
+  select, input { background:#0d1620; color:var(--ink); border:1px solid #2b3a48;
+                  border-radius:7px; padding:6px 9px; font-size:13px; }
+  button { background:var(--accent); color:#04121f; border:0; border-radius:7px;
+           padding:7px 14px; font-weight:700; cursor:pointer; }
+  .controls { display:flex; gap:12px; align-items:end; flex-wrap:wrap; margin-bottom:12px; }
+  .muted { color:var(--muted); font-size:12px; }
+  canvas { max-height:280px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>군복무 청년 상해보험 — 리스크 층화·계리 추정 대시보드</h1>
+  <div class="muted">공개 통계(KDCA·KOSIS·CHS·KNHANES·병무청) 기반 · 실데이터</div>
+  <div class="note" id="note">로딩 중…</div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>① 보장항목별 시도 발생률 (20대 남성, 1,000명당/년)</h2>
+    <canvas id="ratesChart"></canvas>
+  </section>
+
+  <section class="card">
+    <h2>② 집단 리스크 층화 + IRR</h2>
+    <div class="metric"><div><b id="irr">–</b><span>고위험/저위험 IRR</span></div></div>
+    <table id="stratTable"></table>
+    <div class="muted" style="margin-top:8px">개인 예측이 아닌 집단 층화. 고위험 층일수록 흡연·비만 유병률↑.</div>
+  </section>
+
+  <section class="card">
+    <h2>③ 생태학적 회귀 — 위험요인별 발생률비(SD당 IRR)</h2>
+    <div class="metric">
+      <div><b id="ecoN">–</b><span>관측 시도 수</span></div>
+      <div><b id="ecoDev">–</b><span>편차 설명비율</span></div>
+    </div>
+    <table id="ecoTable"></table>
+    <div class="muted" style="margin-top:8px">생태학적 연관(개인 인과 아님). 17개 시도 한계로 흡연만 robust.</div>
+  </section>
+
+  <section class="card">
+    <h2>④ LORO 캘리브레이션 검증</h2>
+    <div class="metric">
+      <div><b id="maeModel">–</b><span>모델 MAE</span></div>
+      <div><b id="maeBase">–</b><span>베이스라인 MAE</span></div>
+      <div><b id="maeImp">–</b><span>개선율</span></div>
+    </div>
+    <canvas id="loroChart"></canvas>
+  </section>
+
+  <section class="card full">
+    <h2>⑤ 예산 최적화 — 지자체 급부 스케줄</h2>
+    <div class="controls">
+      <div><label>지자체</label><br><select id="schedSel"></select></div>
+      <div><label>피보험 인원</label><br><input id="popInput" type="number" value="85000" step="1000" /></div>
+      <div><label>연간 예산(원, 비우면 전체보장)</label><br><input id="budgetInput" type="number" placeholder="예: 1500000000" /></div>
+      <div><button id="calcBtn">계산</button></div>
+    </div>
+    <div class="metric">
+      <div><b id="perCapita">–</b><span>1인당 기대청구액</span></div>
+      <div><b id="premium">–</b><span>권장 보험료(×1.25)</span></div>
+      <div><b id="totalClaims">–</b><span>총 기대청구액</span></div>
+      <div><b id="optPremium">–</b><span>예산조정 후 보험료</span></div>
+    </div>
+    <table id="budgetTable"></table>
+  </section>
+</main>
+
+<script>
+const won = n => n==null ? "–" : "₩" + Math.round(n).toLocaleString("ko-KR");
+const fmt = (n,d=2) => n==null ? "–" : Number(n).toFixed(d);
+async function getJSON(u, opt){ const r = await fetch(u, opt); return r.json(); }
+
+async function init(){
+  const meta = await getJSON("/api/meta");
+  document.getElementById("note").textContent = meta.honesty_note;
+
+  // ① 발생률
+  const rt = await getJSON("/api/rates");
+  const cols = Object.keys(rt.rows[0]).filter(k => k !== "sido");
+  const sidos = rt.rows.map(r => r.sido);
+  new Chart(document.getElementById("ratesChart"), {
+    type:"bar",
+    data:{ labels:sidos, datasets: cols.map((c,i)=>({
+      label:c, data: rt.rows.map(r=>r[c]),
+      backgroundColor:`hsl(${200+i*32} 70% 55% / .85)` })) },
+    options:{ responsive:true, scales:{ x:{ticks:{color:"#9fb0c0"}}, y:{ticks:{color:"#9fb0c0"}} },
+              plugins:{ legend:{labels:{color:"#e8eef4"}} } }
+  });
+
+  // ② 층화
+  const st = await getJSON("/api/stratify");
+  document.getElementById("irr").textContent = fmt(st.irr,2) + "×";
+  buildTable("stratTable",
+    ["stratum","rate_severe_trauma","smoker","obese","binge_drink"],
+    ["층","중증외상율","흡연","비만","폭음"],
+    st.rows, {rate_severe_trauma:3, smoker:3, obese:3, binge_drink:3});
+
+  // ③ 생태회귀
+  const eco = await getJSON("/api/ecological");
+  document.getElementById("ecoN").textContent = eco.n_obs;
+  document.getElementById("ecoDev").textContent = fmt(eco.deviance_explained,3);
+  buildTable("ecoTable",
+    ["위험요인","IRR(SD당)","CI_lo","CI_hi","p"],
+    ["위험요인","IRR","CI low","CI high","p"], eco.rows, {});
+
+  // ④ LORO
+  const val = await getJSON("/api/validation");
+  document.getElementById("maeModel").textContent = fmt(val.metrics.model.mae,2);
+  document.getElementById("maeBase").textContent = fmt(val.metrics.baseline.mae,2);
+  document.getElementById("maeImp").textContent = fmt(val.metrics.mae_improvement_pct,1)+"%";
+  new Chart(document.getElementById("loroChart"), {
+    type:"scatter",
+    data:{ datasets:[
+      { label:"예측 vs 관측", data: val.rows.map(r=>({x:r.predicted,y:r.observed})),
+        backgroundColor:"#4da3ff" },
+      { label:"이상선(y=x)", type:"line",
+        data:[{x:5,y:5},{x:30,y:30}], borderColor:"#ffcc66", borderDash:[5,5],
+        pointRadius:0 } ]},
+    options:{ scales:{ x:{title:{display:true,text:"예측",color:"#9fb0c0"},ticks:{color:"#9fb0c0"}},
+                       y:{title:{display:true,text:"관측",color:"#9fb0c0"},ticks:{color:"#9fb0c0"}} },
+              plugins:{ legend:{labels:{color:"#e8eef4"}} } }
+  });
+
+  // ⑤ 예산
+  const sc = await getJSON("/api/schedules");
+  const sel = document.getElementById("schedSel");
+  sc.schedules.forEach(s => { const o=document.createElement("option");
+    o.value=s.name; o.textContent=`${s.name} (${s.sido})`; sel.appendChild(o); });
+  document.getElementById("calcBtn").onclick = calcBudget;
+  calcBudget();
+}
+
+async function calcBudget(){
+  const body = {
+    schedule: document.getElementById("schedSel").value,
+    population: Number(document.getElementById("popInput").value),
+  };
+  const b = document.getElementById("budgetInput").value;
+  if (b) body.annual_budget = Number(b);
+  const res = await getJSON("/api/budget", {
+    method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+
+  document.getElementById("perCapita").textContent = won(res.per_capita_claims);
+  document.getElementById("premium").textContent = won(res.premium_per_capita);
+  document.getElementById("totalClaims").textContent = won(res.total_claims);
+  document.getElementById("optPremium").textContent =
+    res.optimization ? won(res.optimization.adjusted_premium_per_capita) : "–";
+
+  const items = res.optimization ? res.optimization.by_item : res.by_item;
+  buildTable("budgetTable",
+    ["label","rate_per_1000py","expected_events","payout_per_event","expected_claims"],
+    ["보장항목","발생률(천명당)","기대건수","건당지급","기대청구액"],
+    items, {rate_per_1000py:3, expected_events:1},
+    {payout_per_event:won, expected_claims:won});
+}
+
+function buildTable(id, keys, heads, rows, round={}, fmtFn={}){
+  const t = document.getElementById(id);
+  let html = "<tr>" + heads.map(h=>`<th>${h}</th>`).join("") + "</tr>";
+  rows.forEach(r => {
+    html += "<tr>" + keys.map(k=>{
+      let v = r[k];
+      if (fmtFn[k]) v = fmtFn[k](v);
+      else if (k in round && v!=null) v = Number(v).toFixed(round[k]);
+      return `<td>${v==null?"–":v}</td>`;
+    }).join("") + "</tr>";
+  });
+  t.innerHTML = html;
+}
+
+init();
+</script>
+</body>
+</html>

@@ -66,12 +66,17 @@ src/
 │   ├── rates.py         # 보장항목별 성×연령×시도 발생률 surface(+치명률·장해율 분해)
 │   ├── ecological.py    # 지역 위험요인 ↔ 발생률 생태학적 포아송 회귀
 │   └── stratify.py      # 집단 리스크 층화(저/중/고) + IRR + 층별 프로파일
-└── optimize/
-    └── budget.py        # 기대 청구액·권장 보험료·예산 제약 보장배분
+├── optimize/
+│   └── budget.py        # 기대 청구액·권장 보험료·예산 제약 보장배분
+└── validation/
+    └── report.py        # LORO 캘리브레이션 + 베이스라인 대비 검증
+api(src/api/main.py)     # FastAPI 백엔드(발생률·회귀·층화·검증·예산)
+dashboard/index.html     # 단일 HTML 대시보드(Chart.js)
 scripts/
 ├── run_slice1.py        # 발생률 표 → outputs/conscript_rate_table.csv
-└── run_slice2.py        # 생태회귀 + 층화 + 예산 최적화
-tests/test_pipeline.py   # 실데이터 smoke 테스트
+├── run_slice2.py        # 생태회귀 + 층화 + 예산 최적화
+└── run_slice3.py        # LORO 검증 리포트
+tests/test_pipeline.py   # 실데이터 smoke 테스트(9개)
 ```
 
 ## 실행
@@ -80,7 +85,11 @@ tests/test_pipeline.py   # 실데이터 smoke 테스트
 pip install -r requirements.txt
 python -m scripts.run_slice1     # 보장항목별 시도 발생률
 python -m scripts.run_slice2     # 생태회귀 · 층화 · 예산 최적화
-python -m tests.test_pipeline    # smoke 테스트
+python -m scripts.run_slice3     # LORO 캘리브레이션 검증
+python -m tests.test_pipeline    # smoke 테스트(9개)
+
+# 대시보드
+uvicorn src.api.main:app --reload   #  http://127.0.0.1:8000
 ```
 
 주요 산출(실데이터 기준):
@@ -90,6 +99,8 @@ python -m tests.test_pipeline    # smoke 테스트
 - 집단 리스크 층화 — 고/저 **IRR 3.95**, 고위험 층의 흡연·비만 유병률이 더 높음.
 - 예산 최적화 — 경기도 1인당 기대청구액 약 1.8만원(핵심 4개 항목 하한),
   예산 제약 시 사망>후유장해>골절>입원 우선순위로 보장 배분.
+- **LORO 검증** — 모델 MAE 4.00 vs 베이스라인(전국평균) 5.82 → **31% 개선**,
+  캘리브레이션 기울기 0.83, Pearson r 0.69. 지역 위험요인이 발생률 예측을 개선.
 
 ---
 
@@ -98,8 +109,13 @@ python -m tests.test_pipeline    # smoke 테스트
 - **slice 1 (완료)** — 데이터 로딩/정제 + 보장항목별 기준 발생률 surface.
 - **slice 2 (완료)** — 생태학적 포아송 회귀 + 집단 층화/IRR + 치명률·장해율
   분해 + 급부표 구조화 + 예산 최적화.
-- **slice 3** — LORO(leave-one-region-out) 캘리브레이션 검증 리포트 +
-  FastAPI + 단일 HTML 대시보드.
+- **slice 3 (완료)** — LORO 캘리브레이션 검증 + FastAPI + 단일 HTML 대시보드.
+
+### 향후 확장
+- 후유장해 지급률(3~100%) 가중으로 상한 추정 정밀화, 정신질환·수술비 등
+  미매칭 항목의 발생률 소스 보강.
+- 병무청 연감 PDF 파싱으로 피보험 모집단 규모·BMI 분포 정밀화.
+- KOSIS 사망원인표를 질병사망 보장 검증에 직접 결합.
 
 ## 한계
 

@@ -47,6 +47,10 @@ class EcologicalFit:
         beta = self.coef[self.predictors]
         return z.mul(beta, axis=1).sum(axis=1)
 
+    def predict_rate_per_100k(self, X: pd.DataFrame) -> pd.Series:
+        """원척도 위험요인 값 → 예측 발생률(인구 10만명당). 절편 포함."""
+        return np.exp(self.coef["const"] + self.linear_predictor(X)) * 1e5
+
 
 def _region_exposure() -> pd.DataFrame:
     """시도별 중증외상 발생건수와 노출인구(건수/발생률×1e5)."""
@@ -59,14 +63,16 @@ def _region_exposure() -> pd.DataFrame:
     return pd.DataFrame({"count": cnt, "rate_per_100k": rate, "pop": pop})
 
 
-def fit(predictors: list[str] | None = None) -> EcologicalFit:
-    """생태학적 포아송 회귀를 적합한다."""
+def build_dataset(predictors: list[str] | None = None) -> pd.DataFrame:
+    """시도별 위험요인 유병률 + 발생건수/노출인구 병합 데이터셋."""
     predictors = predictors or DEFAULT_PREDICTORS
-
     prev = aggregate.region_risk_prevalence(factors=predictors)
     expo = _region_exposure()
-    data = prev.join(expo, how="inner").dropna(subset=predictors + ["count", "pop"])
+    return prev.join(expo, how="inner").dropna(subset=predictors + ["count", "pop"])
 
+
+def fit_dataset(data: pd.DataFrame, predictors: list[str]) -> EcologicalFit:
+    """준비된 데이터셋으로 생태회귀를 적합한다(LORO 재사용)."""
     means = data[predictors].mean()
     stds = data[predictors].std(ddof=0).replace(0, 1.0)
     Z = (data[predictors] - means) / stds
@@ -102,6 +108,13 @@ def fit(predictors: list[str] | None = None) -> EcologicalFit:
         n_obs=len(data),
         pseudo_r2=float(pseudo),
     )
+
+
+def fit(predictors: list[str] | None = None) -> EcologicalFit:
+    """생태학적 포아송 회귀를 적합한다(전체 시도)."""
+    predictors = predictors or DEFAULT_PREDICTORS
+    data = build_dataset(predictors)
+    return fit_dataset(data, predictors)
 
 
 def summary_table(efit: EcologicalFit) -> pd.DataFrame:

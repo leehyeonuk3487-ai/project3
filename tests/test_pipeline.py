@@ -10,6 +10,7 @@ from src import config
 from src.data import aggregate, benefits, loaders
 from src.models import ecological, rates, stratify
 from src.optimize import budget
+from src.validation import report
 
 
 def test_loaders_shapes():
@@ -60,6 +61,29 @@ def test_budget_respects_constraint():
     assert opt["estimate"].premium_per_capita <= 15_000 + 1
     for v in opt["coverage_scale"].values():
         assert 0.0 <= v <= 1.0
+
+
+def test_loro_calibration():
+    res = report.loro_calibration()
+    assert len(res["predictions"]) == 17
+    m = res["metrics"]
+    # 모델 예측은 관측과 양의 상관(지역 위험요인이 신호를 담음)
+    assert m["model"]["pearson_r"] > 0.3
+    # 예측 발생률은 양수, 현실 범위
+    assert res["predictions"]["predicted"].between(1, 60).all()
+
+
+def test_api_endpoints():
+    from fastapi.testclient import TestClient
+    from src.api.main import app
+    c = TestClient(app)
+    for ep in ["/api/meta", "/api/rates", "/api/ecological",
+               "/api/stratify", "/api/validation", "/api/schedules"]:
+        assert c.get(ep).status_code == 200
+    r = c.post("/api/budget", json={"schedule": "경기도", "population": 85000,
+                                    "annual_budget": 85000 * 15000})
+    assert r.status_code == 200
+    assert r.json()["optimization"]["adjusted_premium_per_capita"] <= 15000 + 1
 
 
 def _run_all():
