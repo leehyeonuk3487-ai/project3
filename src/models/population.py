@@ -67,6 +67,31 @@ def bmi_distribution() -> dict:
     return loaders.load_mma_bmi_distribution()["dist"]
 
 
+def cohort_profile(sido: str, year: int = 2024) -> dict:
+    """지자체 현역 코호트 프로파일 (M1: 병무청 BMI + CHS 행태·만성질환 연결).
+
+    - bmi_dist : 병무청 신체검사 전국 현역 BMI 구간 분포(실제 연결)
+    - risk_prevalence : 해당 시도 20대 남성의 CHS 위험요인 가중 유병률
+    M4(코호트 보정)에서 이 프로파일을 ML 상대위험에 적용한다.
+    """
+    from ..data import aggregate
+    chs = aggregate.add_risk_indicators(loaders.load_chs())
+    cohort = chs[(chs["sido"] == sido) & (chs["sex_name"] == "남자")
+                 & (chs["age"].between(20, 29))]
+    prev = {}
+    for f in aggregate.RISK_FACTORS:
+        v, w = cohort[f], cohort["wt_p"]
+        m = v.notna() & w.notna()
+        prev[f] = float((v[m] * w[m]).sum() / w[m].sum()) if m.any() else float("nan")
+    return {
+        "sido": sido, "year": year,
+        "conscripts": round(conscript_stock(sido, year)),
+        "bmi_distribution": bmi_distribution(),     # 병무청(실제 연결)
+        "risk_prevalence": prev,                    # CHS 20대남 시도
+        "n_chs": int(len(cohort)),
+    }
+
+
 def available_years() -> tuple[int, int]:
     pop = _population()
     return int(pop["year"].min()), int(pop["year"].max())

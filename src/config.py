@@ -45,6 +45,9 @@ DISCHARGE_DIR = RAW / "kdca_discharge_injury"
 # KOSIS
 POPULATION_CSV = RAW / "kosis_population" / "population_projection_sex_age5_region.csv"
 DEATH_CAUSE_CSV = RAW / "kosis_death_cause" / "death_cause_by_region_sex_age5.csv"
+# M0: 104 사인분류 재추출 드롭인 위치(현재 부재 — KOSIS egress 차단으로 재추출 불가).
+#     스키마: [사망원인(코드/명), 시도, 성, 연령, 연도들…] (사망률 십만명당 또는 사망자수)
+DEATH_CAUSE_BY_CAUSE_CSV = RAW / "kosis_death_cause" / "death_cause_by_cause_region_sex_age5.csv"
 
 # 병무청
 MMA_DIR = RAW / "mma_judgment_status"

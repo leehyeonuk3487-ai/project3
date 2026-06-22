@@ -6,6 +6,9 @@ numpy>=1.24
 statsmodels>=0.14      # Poisson/NB ecological regression
 scikit-learn>=1.3      # stratification helpers, calibration metrics
 
+# ML modules (M3 panel GBM; M2 when injury labels available)
+lightgbm>=4.0          # gradient-boosted cell-panel incidence surface
+
 # API + dashboard (slice 3)
 fastapi>=0.110
 uvicorn[standard]>=0.27

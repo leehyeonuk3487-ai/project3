@@ -7,8 +7,8 @@ from __future__ import annotations
 import numpy as np
 
 from src import config
-from src.data import aggregate, benefits, loaders, mma_api
-from src.models import calibration, ecological, population, rates, stratify
+from src.data import aggregate, benefits, loaders, mma_api, mortality
+from src.models import calibration, ecological, panel, population, rates, stratify
 from src.optimize import budget
 from src.validation import report
 
@@ -141,6 +141,40 @@ def test_api_endpoints():
         assert c.get(ep).status_code == 200
     r = c.post("/api/budget", json={"schedule": "경기도"})
     assert r.status_code == 200 and r.json()["population"] > 0
+
+
+def test_m1_bmi_wired_and_knhanes_features():
+    # M1: bmi_distribution()이 코호트 프로파일에 실제 연결(dead code 0)
+    prof = population.cohort_profile("경기", 2024)
+    assert abs(sum(prof["bmi_distribution"].values()) - 1.0) < 0.05
+    assert prof["conscripts"] > 0 and prof["risk_prevalence"]["smoker"] > 0
+    kf = loaders.load_knhanes_features()
+    assert {"bmi", "smoker", "hypertension", "diabetes"}.issubset(kf.columns)
+    # 손상 결과변수는 부재해야 정상(M2 라벨 부재 근거)
+    assert not any("inj" in c.lower() or "손상" in c for c in kf.columns)
+
+
+def test_m0_cause_mapping_and_blocker():
+    # M0: 분류 규칙 정확 + 데이터 부재 보고
+    assert mortality.classify_cause("X70") == "suicide"      # 자살 분리
+    assert mortality.classify_cause("C34") == "disease"
+    assert mortality.classify_cause("V89") == "injury"
+    assert mortality.classify_cause("악성신생물(암)") == "disease"
+    assert mortality.available() is False                    # 104항목 파일 부재
+    assert mortality.load_mortality_by_cause() is None        # 폴백
+
+
+def test_m3_panel_gbm_vs_baseline():
+    # M3: CV 성능 보고 + 채택규칙. 시드 고정 재현성.
+    r1 = panel.evaluate()
+    r2 = panel.evaluate()
+    assert r1.temporal["gbm_rmse"] == r2.temporal["gbm_rmse"]   # 재현성
+    assert r1.n_obs > 200
+    # 두 모델 모두 RMSE 보고
+    assert r1.temporal["baseline_rmse"] > 0 and r1.temporal["gbm_rmse"] > 0
+    if r1.adopt_gbm:   # 채택 시 surface 예측 동작
+        s = panel.predict_surface(2023)
+        assert (s["rate_per_100k"] > 0).all()
 
 
 def test_mma_api_client_graceful():

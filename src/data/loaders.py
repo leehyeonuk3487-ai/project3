@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from .. import config
@@ -46,6 +47,31 @@ def load_knhanes() -> pd.DataFrame:
     else:
         df["bmi"] = _bmi(df["HE_ht"], df["HE_wt"])
     return df
+
+
+def load_knhanes_features() -> pd.DataFrame:
+    """KNHANES 개인 피처 프레임 (M1 적재 — 만성질환·행태·BMI).
+
+    측정 BMI + 흡연(BS3_1) + 신체활동(BE3_71 고강도/BE3_81 중강도/pa_aerobic) +
+    만성질환(DI1_dg 고혈압/DE1_dg 당뇨) + 연령·성을 모델 입력용으로 정규화한다.
+    값코드: DI1_dg/DE1_dg 0=무,1=유,8=비해당; BE3_* 1=예,2=아니오,8/9=결측.
+    ⚠️ 손상(IJMT) 결과변수는 본 처리본에 없음 → M2 지도학습은 라벨 부재로 불가.
+    """
+    df = load_knhanes()
+    out = pd.DataFrame(index=df.index)
+    out["age"] = pd.to_numeric(df["age"], errors="coerce")
+    out["sex"] = df["sex"]
+    out["bmi"] = df["bmi"]
+    smk = df["BS3_1"]
+    out["smoker"] = np.where(smk.isin([1, 2]), 1.0,
+                             np.where(smk.isin([3, 8]), 0.0, np.nan))
+    out["vigorous_pa"] = df["BE3_71"].map({1: 1.0, 2: 0.0})
+    out["moderate_pa"] = df["BE3_81"].map({1: 1.0, 2: 0.0})
+    out["aerobic_pa"] = pd.to_numeric(df.get("pa_aerobic"), errors="coerce")
+    out["hypertension"] = df["DI1_dg"].map({0: 0.0, 1: 1.0})
+    out["diabetes"] = df["DE1_dg"].map({0: 0.0, 1: 1.0})
+    out["weight"] = df["wt_itvex"]
+    return out
 
 
 def _bmi(height_cm: pd.Series, weight_kg: pd.Series) -> pd.Series:
