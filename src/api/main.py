@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from .. import config
 from ..data import benefits
-from ..models import ecological, rates, stratify
+from ..models import calibration, ecological, population, rates, stratify
 from ..optimize import budget
 from ..validation import report
 
@@ -110,30 +110,60 @@ def api_schedules():
     for name in benefits.list_schedules():
         sched = benefits.SCHEDULES[name]
         out.append({"name": name, "sido": benefits.SCHEDULE_SIDO[name],
+                    "province_wide": benefits.IS_PROVINCE_WIDE.get(name, False),
+                    "approx": benefits.is_approx(name),
                     "items": {k: v["amount"] for k, v in sched.items()}})
     return {"schedules": out}
 
 
+@app.get("/api/calibration")
+def api_calibration():
+    return {"rows": _records(calibration.calibration_factors())}
+
+
+@app.get("/api/consistency")
+def api_consistency():
+    con = report.disease_track_consistency()
+    return {"all_death_envelope_ok": con["all_death_envelope_ok"],
+            "disease_death_le_incidence_ok": con["disease_death_le_incidence_ok"],
+            "rows": _records(con["table"].round(4))}
+
+
+@app.get("/api/population")
+def api_population(schedule: str, year: int = 2024):
+    sido = benefits.SCHEDULE_SIDO[schedule]
+    years = list(range(2024, 2036, 2))
+    proj = budget.project_budget(schedule, years)
+    return {"schedule": schedule, "sido": sido,
+            "province_wide": benefits.IS_PROVINCE_WIDE.get(schedule, False),
+            "projection": _records(proj, reset_index=False)}
+
+
 class BudgetRequest(BaseModel):
     schedule: str
-    population: int = 85_000
+    population: int | None = None       # None이면 인구추계·병무청 기반 자동 산출
+    year: int = 2024
     annual_budget: float | None = None  # None이면 전체 보장 기대청구액만
 
 
 @app.post("/api/budget")
 def api_budget(req: BudgetRequest):
-    est = budget.expected_claims(req.schedule, req.population)
+    est = budget.expected_claims(req.schedule, req.population, req.year)
     out = {
         "schedule": req.schedule,
         "sido": est.sido,
-        "population": req.population,
+        "year": est.year,
+        "population": est.population,
+        "population_source": est.population_source,
         "total_claims": _clean(est.total_claims),
         "per_capita_claims": _clean(est.per_capita_claims),
         "premium_per_capita": _clean(est.premium_per_capita),
+        "reported_premium": benefits.REPORTED_PREMIUM.get(req.schedule),
         "by_item": _records(est.by_item, reset_index=False),
     }
     if req.annual_budget is not None:
-        opt = budget.optimize_under_budget(req.schedule, req.population, req.annual_budget)
+        opt = budget.optimize_under_budget(req.schedule, req.annual_budget,
+                                           req.population, req.year)
         out["optimization"] = {
             "budget": req.annual_budget,
             "feasible_full": opt["feasible_full"],

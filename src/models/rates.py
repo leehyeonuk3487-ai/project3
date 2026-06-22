@@ -144,6 +144,90 @@ def severe_trauma_outcome_surface(outcome: str) -> pd.DataFrame:
     return out.drop(columns=["share"])
 
 
+def nontrauma_outcome_surface(outcome: str) -> pd.DataFrame:
+    """비외상 중증 발생률 × 지역별 결과분율 = 질병사망/질병후유장해 surface.
+
+    outcome: 'fatality'(질병사망) | 'disability'(질병후유장해) | 'severe_disability'
+    외상 트랙과 동일 구조. 분율은 시도 차원만 있어 발생 surface에 시도별로 곱한다.
+    """
+    base = nontrauma_surface()
+    loader = {
+        "fatality": loaders.load_nontrauma_fatality_share,
+        "disability": loaders.load_nontrauma_disability_share,
+        "severe_disability": loaders.load_nontrauma_severe_disability_share,
+    }[outcome]
+    share_df = loader()
+    shares = _region_share_map(share_df)
+    national = share_df[
+        (share_df["dim"] == "전국")
+        & share_df["metric"].str.contains(_SHARE_METRIC, na=False)
+    ]["value"]
+    national_share = float(national.iloc[-1]) / 100.0 if len(national) else float("nan")
+
+    out = base.copy()
+    out["share"] = out["sido"].map(shares).fillna(national_share)
+    out["rate_per_100k"] = out["rate_per_100k"] * out["share"]
+    out["rate_per_1000py"] = out["rate_per_100k"] / 100.0
+    out["source"] = f"kdca_nontrauma_{outcome}"
+    return out.drop(columns=["share"])
+
+
+def death_all_surface() -> pd.DataFrame:
+    """전체 사망률 surface (KOSIS 사망원인, 시도×성×5세연령).
+
+    질병+외인 합의 전체 사망률. 검증용 envelope. age는 5세 구간(age5)이라
+    별도 컬럼명(age5)을 쓴다.
+    """
+    dc = loaders.load_death_cause()
+    year = int(dc["year"].max())
+    sub = dc[(dc["year"] == year) & dc["death_rate_100k"].notna()
+             & dc["sex_name"].isin(["남자", "여자"])
+             & (dc["sido"] != "전국")].copy()
+    sub = sub.rename(columns={"sex_name": "sex", "death_rate_100k": "rate_per_100k"})
+    sub["rate_per_1000py"] = sub["rate_per_100k"] / 100.0
+    sub["year"] = year
+    sub["source"] = "kosis_death_cause"
+    return sub[["sido", "sex", "age5", "rate_per_100k", "rate_per_1000py", "year", "source"]]
+
+
+def injury_death_outcome_share(sex: str = "남자") -> float:
+    """퇴원손상 치료결과 중 '사망' 분율(성별, 최근연도). 상해사망 일반화용."""
+    df = loaders.load_discharge_treatment_outcome()
+    year = int(df["year"].max())
+    sub = df[(df["dim"] == sex) & (df["level"] == "사망")
+             & df["metric"].str.contains(_SHARE_METRIC, na=False) & (df["year"] == year)]
+    return float(sub["value"].iloc[0]) / 100.0 if len(sub) else float("nan")
+
+
+def severe_disability_payout_ratio(track: str = "trauma") -> float:
+    """후유장해 정액 지급 보정계수 (지급률 가중).
+
+    장해 중 중증(100% 지급)의 비중과 경증의 평균 지급률로 평균 지급비율을 추정한다.
+        ratio = severe_share/disability_share × 1.0
+              + (1 - severe_share/disability_share) × PARTIAL
+    PARTIAL(경·중등도 평균 지급률)은 보수적으로 0.30 가정.
+    """
+    PARTIAL = 0.30
+    if track == "trauma":
+        dis = loaders.load_trauma_disability_share()
+        sev = loaders.load_trauma_severe_disability_share()
+    else:
+        dis = loaders.load_nontrauma_disability_share()
+        sev = loaders.load_nontrauma_severe_disability_share()
+
+    def _nat(df):
+        y = int(df["year"].max())
+        v = df[(df["dim"] == "전국") & df["metric"].str.contains(_SHARE_METRIC, na=False)
+               & (df["year"] == y)]["value"]
+        return float(v.iloc[-1]) / 100.0 if len(v) else float("nan")
+
+    d, s = _nat(dis), _nat(sev)
+    if not d or d <= 0:
+        return 1.0
+    severe_frac = min(s / d, 1.0)
+    return severe_frac * 1.0 + (1 - severe_frac) * PARTIAL
+
+
 def nontrauma_surface() -> pd.DataFrame:
     """비외상 중증질환 발생률 기반 surface."""
     df = loaders.load_nontrauma_incidence()
@@ -241,8 +325,14 @@ def coverage_rate_surface(item: str) -> pd.DataFrame:
         surf = severe_trauma_outcome_surface("disability")
     elif src == "nontrauma":
         surf = nontrauma_surface()
+    elif src == "nontrauma_fatality":
+        surf = nontrauma_outcome_surface("fatality")
+    elif src == "nontrauma_disability":
+        surf = nontrauma_outcome_surface("disability")
     elif src == "discharge_injury":
         surf = discharge_surface(item)
+    elif src == "death_cause":
+        surf = death_all_surface()
     else:
         raise ValueError(f"미지원 source: {src}")
     surf["coverage_item"] = item
@@ -250,30 +340,39 @@ def coverage_rate_surface(item: str) -> pd.DataFrame:
     return surf
 
 
-def conscript_rate_table() -> pd.DataFrame:
-    """현역 청년(20대 남성) 코호트의 보장항목별 시도 발생률 요약표.
+def conscript_item_rate(item: str, sido: str | None = None) -> pd.Series | float:
+    """현역 청년(20대 남성) 보장항목 발생률(1,000명당/년).
 
-    slice 1의 핵심 산출물. 각 보장항목에 대해 시도별 기대 발생률
-    (인구 1,000명당, 20-29세 남성)을 정리한다.
+    age5(death_cause)·discharge·KDCA10세 구간을 각각 20대 남성 셀로 맞춘다.
+    sido 지정 시 스칼라, 아니면 시도 인덱스 Series 반환.
     """
+    surf = coverage_rate_surface(item)
+    male = surf["sex"].eq("남자")
+    if "age5" in surf:                       # death_cause: 20-24 + 25-29 평균
+        m = male & surf["age5"].isin(["20-24세", "25-29세"])
+        sub = surf[m].groupby("sido")["rate_per_1000py"].mean()
+    elif "discharge_age_band" in surf:       # 퇴원표: 15-24/25-34 평균
+        m = male & surf["discharge_age_band"].isin(["15-24세", "25-34세"])
+        sub = surf[m].groupby("sido")["rate_per_1000py"].mean()
+    else:                                    # KDCA 10세: 20-29세
+        m = male & surf["age_band"].eq(config.CONSCRIPT_KDCA_AGE_BAND)
+        sub = surf[m].groupby("sido")["rate_per_1000py"].mean()
+    if sido is not None:
+        return float(sub.get(sido, float("nan")))
+    return sub
+
+
+def conscript_rate_table(items: list[str] | None = None) -> pd.DataFrame:
+    """현역 청년(20대 남성) 보장항목별 시도 발생률 표(1,000명당/년).
+
+    기본은 보장(급부) 항목 + 발생 기준 + 전체사망(검증) 전부.
+    """
+    items = items or list(config.COVERAGE_ITEMS)
     frames = []
-    for item in config.COVERAGE_ITEMS:
-        surf = coverage_rate_surface(item)
-        sex_col = "sex"
-        age_col = "discharge_age_band" if "discharge_age_band" in surf else "age_band"
-        # 퇴원표 연령구간(15-24/25-34)은 20대를 직접 담지 못하므로 인접 구간 평균
-        if age_col == "discharge_age_band":
-            mask = surf[sex_col].eq("남자") & surf[age_col].isin(["15-24세", "25-34세"])
-            sub = surf[mask].groupby("sido", as_index=False)["rate_per_1000py"].mean()
-        else:
-            mask = surf[sex_col].eq("남자") & surf[age_col].eq(config.CONSCRIPT_KDCA_AGE_BAND)
-            sub = surf[mask][["sido", "rate_per_1000py"]].copy()
-        sub["coverage_item"] = item
+    for item in items:
+        sub = conscript_item_rate(item).rename("rate_per_1000py").reset_index()
         sub["coverage_label"] = config.COVERAGE_ITEMS[item]["label"]
         frames.append(sub)
-
     long = pd.concat(frames, ignore_index=True)
-    wide = long.pivot_table(
-        index="sido", columns="coverage_label", values="rate_per_1000py"
-    ).round(3)
-    return wide
+    return long.pivot_table(index="sido", columns="coverage_label",
+                            values="rate_per_1000py").round(3)

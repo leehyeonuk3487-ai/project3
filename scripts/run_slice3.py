@@ -26,7 +26,8 @@ def main() -> None:
     res = report.loro_calibration()
     print(report.format_report(res))
     print()
-    print(res["predictions"].round(2).to_string())
+    print(res["predictions"][["observed", "predicted", "pred_lo", "pred_hi", "baseline"]]
+          .round(1).to_string())
 
     out = config.OUTPUTS / "loro_calibration.csv"
     res["predictions"].round(3).to_csv(out, encoding="utf-8-sig")
@@ -36,7 +37,19 @@ def main() -> None:
     verdict = ("지역 위험요인 정보가 발생률 예측을 개선함"
                if m["mae_improvement"] > 0 else
                "지역 위험요인이 베이스라인 대비 개선 없음")
-    print(f"\n판정: {verdict} (MAE {m['baseline']['mae']:.2f} → {m['model']['mae']:.2f}).")
+    print(f"\n판정: {verdict} (MAE {m['baseline']['mae']:.2f} → {m['model']['mae']:.2f}, "
+          f"예측구간 적중 {m['pi_coverage']*100:.0f}%).")
+
+    # KNHANES 보정 + 질병 트랙 정합성
+    from src.models import calibration
+    section_line = "\n" + "-" * 78
+    print(section_line); print("KNHANES 측정값 보정계수(CHS 자가보고 → 측정값)")
+    print(calibration.calibration_factors().to_string())
+
+    print(section_line); print("질병 트랙 정합성 점검")
+    con = report.disease_track_consistency()
+    print(f"  (상해사망+질병사망) ≤ 전체사망(검증): {con['all_death_envelope_ok']}")
+    print(f"  질병사망 ≤ 비외상 발생: {con['disease_death_le_incidence_ok']}")
 
     print("\n" + "-" * 78)
     print("대시보드 실행:")

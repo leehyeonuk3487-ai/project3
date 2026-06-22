@@ -67,30 +67,35 @@
   </section>
 
   <section class="card">
-    <h2>④ LORO 캘리브레이션 검증</h2>
+    <h2>④ LORO 캘리브레이션 검증 (+예측구간)</h2>
     <div class="metric">
       <div><b id="maeModel">–</b><span>모델 MAE</span></div>
       <div><b id="maeBase">–</b><span>베이스라인 MAE</span></div>
       <div><b id="maeImp">–</b><span>개선율</span></div>
+      <div><b id="piCov">–</b><span>95% 예측구간 적중</span></div>
     </div>
     <canvas id="loroChart"></canvas>
   </section>
 
   <section class="card full">
-    <h2>⑤ 예산 최적화 — 지자체 급부 스케줄</h2>
+    <h2>⑤ 예산 최적화 — 지자체 급부 스케줄 (현역 N 자동산출)</h2>
     <div class="controls">
       <div><label>지자체</label><br><select id="schedSel"></select></div>
-      <div><label>피보험 인원</label><br><input id="popInput" type="number" value="85000" step="1000" /></div>
+      <div><label>현역 인원(비우면 자동: 병무청·인구추계)</label><br><input id="popInput" type="number" placeholder="자동" step="1000" /></div>
       <div><label>연간 예산(원, 비우면 전체보장)</label><br><input id="budgetInput" type="number" placeholder="예: 1500000000" /></div>
       <div><button id="calcBtn">계산</button></div>
     </div>
     <div class="metric">
+      <div><b id="popOut">–</b><span>현역 N</span></div>
       <div><b id="perCapita">–</b><span>1인당 기대청구액</span></div>
       <div><b id="premium">–</b><span>권장 보험료(×1.25)</span></div>
-      <div><b id="totalClaims">–</b><span>총 기대청구액</span></div>
+      <div><b id="reported">–</b><span>보고된 보험료</span></div>
       <div><b id="optPremium">–</b><span>예산조정 후 보험료</span></div>
     </div>
     <table id="budgetTable"></table>
+    <div class="muted" id="popNote" style="margin-top:8px"></div>
+    <h2 style="margin-top:16px">⑥ 인구절벽 예산 투영 (2024→2034)</h2>
+    <canvas id="projChart"></canvas>
   </section>
 </main>
 
@@ -137,6 +142,7 @@ async function init(){
   document.getElementById("maeModel").textContent = fmt(val.metrics.model.mae,2);
   document.getElementById("maeBase").textContent = fmt(val.metrics.baseline.mae,2);
   document.getElementById("maeImp").textContent = fmt(val.metrics.mae_improvement_pct,1)+"%";
+  document.getElementById("piCov").textContent = Math.round(val.metrics.pi_coverage*100)+"%";
   new Chart(document.getElementById("loroChart"), {
     type:"scatter",
     data:{ datasets:[
@@ -160,27 +166,47 @@ async function init(){
 }
 
 async function calcBudget(){
-  const body = {
-    schedule: document.getElementById("schedSel").value,
-    population: Number(document.getElementById("popInput").value),
-  };
+  const schedule = document.getElementById("schedSel").value;
+  const body = { schedule };
+  const p = document.getElementById("popInput").value;
+  if (p) body.population = Number(p);
   const b = document.getElementById("budgetInput").value;
   if (b) body.annual_budget = Number(b);
   const res = await getJSON("/api/budget", {
     method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
 
+  document.getElementById("popOut").textContent = res.population.toLocaleString("ko-KR");
   document.getElementById("perCapita").textContent = won(res.per_capita_claims);
   document.getElementById("premium").textContent = won(res.premium_per_capita);
-  document.getElementById("totalClaims").textContent = won(res.total_claims);
+  document.getElementById("reported").textContent = res.reported_premium ? won(res.reported_premium) : "–";
   document.getElementById("optPremium").textContent =
     res.optimization ? won(res.optimization.adjusted_premium_per_capita) : "–";
+  document.getElementById("popNote").textContent =
+    `현역 N 산출: ${res.population_source} · 보장은 '20대 남성 × ${res.sido}' 발생률 셀 기준 · 미매칭 항목 제외(하한)`;
 
   const items = res.optimization ? res.optimization.by_item : res.by_item;
   buildTable("budgetTable",
-    ["label","rate_per_1000py","expected_events","payout_per_event","expected_claims"],
-    ["보장항목","발생률(천명당)","기대건수","건당지급","기대청구액"],
+    ["label","track","rate_per_1000py","expected_events","payout_per_event","expected_claims"],
+    ["보장항목","트랙","발생률(천명당)","기대건수","건당지급","기대청구액"],
     items, {rate_per_1000py:3, expected_events:1},
     {payout_per_event:won, expected_claims:won});
+
+  // ⑥ 투영
+  const pop = await getJSON("/api/population?schedule="+encodeURIComponent(schedule));
+  const pr = pop.projection;
+  if (window._proj) window._proj.destroy();
+  window._proj = new Chart(document.getElementById("projChart"), {
+    data:{ labels: pr.map(r=>r.year), datasets:[
+      { type:"bar", label:"현역 N", data: pr.map(r=>r.population), yAxisID:"y",
+        backgroundColor:"#2d6fb0" },
+      { type:"line", label:"총 보험료(원)", data: pr.map(r=>r.total_premium), yAxisID:"y1",
+        borderColor:"#ffcc66", tension:.2 } ]},
+    options:{ scales:{
+      y:{position:"left",ticks:{color:"#9fb0c0"},title:{display:true,text:"현역 N",color:"#9fb0c0"}},
+      y1:{position:"right",grid:{drawOnChartArea:false},ticks:{color:"#9fb0c0"}},
+      x:{ticks:{color:"#9fb0c0"}} },
+      plugins:{ legend:{labels:{color:"#e8eef4"}} } }
+  });
 }
 
 function buildTable(id, keys, heads, rows, round={}, fmtFn={}){

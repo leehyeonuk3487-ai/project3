@@ -48,34 +48,34 @@ def main() -> None:
                                   encoding="utf-8-sig")
 
     # 3) 예산 최적화 ----------------------------------------------------------
-    section("3) 예산 최적화 — 지자체 급부 스케줄별 기대 청구액")
-    pop = 85_000  # 경기도 보고 모집단 규모(6.8만~10.5만) 중간값
+    section("3) 예산 최적화 — 자동 현역 N(병무청·인구추계) × 급부 스케줄")
     summary = []
     for name in benefits.list_schedules():
-        est = budget.expected_claims(name, population=pop)
+        est = budget.expected_claims(name)  # 자동 N
         summary.append({
-            "지자체": name,
+            "지자체": name, "현역N": est.population, "N출처": est.population_source,
             "1인 기대청구액": round(est.per_capita_claims),
             "권장보험료(×1.25)": round(est.premium_per_capita),
         })
-    print(f"공통 모집단 N={pop:,} 가정")
     print(pd.DataFrame(summary).to_string(index=False))
 
-    print("\n경기도 항목별 상세:")
-    est = budget.expected_claims("경기도", population=pop)
+    print("\n경기도 항목별 상세(상해+질병 트랙):")
+    est = budget.expected_claims("경기도")
     print(est.by_item.to_string(index=False))
-    print(f"총 기대청구액 {est.total_claims:,.0f}원 / 권장 보험료 {est.premium_per_capita:,.0f}원 "
-          f"(보고치 47,920원 — 본 추정은 핵심 4개 항목만 반영한 하한)")
+    print(f"현역 N {est.population:,}(자동) / 총 기대청구액 {est.total_claims:,.0f}원 / "
+          f"권장 보험료 {est.premium_per_capita:,.0f}원 (보고치 47,920원 — 미매칭 항목 제외 하한)")
     est.by_item.to_csv(config.OUTPUTS / "gyeonggi_claims.csv",
                        index=False, encoding="utf-8-sig")
 
-    section("3-b) 예산 제약 시나리오 — 1인당 1.5만원 한도 배분")
-    opt = budget.optimize_under_budget("경기도", pop, annual_budget=pop * 15_000)
-    print(f"전체 보장 필요액(1인 {est.premium_per_capita:,.0f}원) > 예산 15,000원 → 우선순위 배분")
+    section("3-b) 예산 제약 시나리오 — 1인당 1.5만원 한도 (사망>후유장해>질병>골절>입원)")
+    opt = budget.optimize_under_budget("경기도", annual_budget=est.population * 15_000)
     print("항목별 보장배수:", {k: round(v, 3) for k, v in opt["coverage_scale"].items()})
     e2 = opt["estimate"]
-    print(e2.by_item[["label", "payout_per_event", "expected_claims"]].to_string(index=False))
+    print(e2.by_item[["label", "track", "payout_per_event", "expected_claims"]].to_string(index=False))
     print(f"조정 후 1인당 권장 보험료 {e2.premium_per_capita:,.0f}원")
+
+    section("3-c) 인구절벽 예산 투영 (경기도)")
+    print(budget.project_budget("경기도", [2024, 2026, 2028, 2030, 2032, 2034]).to_string(index=False))
 
 
 if __name__ == "__main__":

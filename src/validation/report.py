@@ -30,16 +30,21 @@ def loro_calibration(predictors: list[str] | None = None) -> dict:
         train = data.drop(index=sido)
         test = data.loc[[sido]]
         fit = ecological.fit_dataset(train, predictors)
-        pred = float(fit.predict_rate_per_100k(test).iloc[0])
+        ci = fit.predict_rate_ci(test, exposure=test["pop"].values).iloc[0]
         # 베이스라인: 학습 시도들의 인구가중 평균 발생률(지역 위험요인 무시)
         baseline = float((train["count"].sum() / train["pop"].sum()) * 1e5)
         rows.append({
             "sido": sido,
             "observed": float(test["rate_per_100k"].iloc[0]),
-            "predicted": pred,
+            "predicted": float(ci["rate"]),
+            "pred_lo": float(ci["lo"]),
+            "pred_hi": float(ci["hi"]),
             "baseline": baseline,
         })
     pred_df = pd.DataFrame(rows).set_index("sido").sort_index()
+    # 관측값이 예측 95% 구간 안에 드는 비율(coverage)
+    inside = ((pred_df["observed"] >= pred_df["pred_lo"])
+              & (pred_df["observed"] <= pred_df["pred_hi"])).mean()
 
     metrics = {
         "model": _error_metrics(pred_df["observed"], pred_df["predicted"]),
@@ -52,7 +57,35 @@ def loro_calibration(predictors: list[str] | None = None) -> dict:
         100.0 * metrics["mae_improvement"] / metrics["baseline"]["mae"]
         if metrics["baseline"]["mae"] else float("nan")
     )
+    metrics["pi_coverage"] = float(inside)
     return {"predictions": pred_df, "metrics": metrics, "predictors": predictors}
+
+
+def disease_track_consistency() -> dict:
+    """질병 트랙 정합성 점검.
+
+    각 시도 20대 남성에 대해 (상해사망+질병사망) ≤ 전체사망(검증) 인지,
+    질병사망 ≤ 비외상 발생 인지 확인한다.
+    """
+    from ..models import rates
+    death_inj = rates.conscript_item_rate("death_injury")     # 중증외상 사망(협의)
+    death_dis = rates.conscript_item_rate("death_disease")
+    death_all = rates.conscript_item_rate("death_all")
+    nontrauma = rates.conscript_item_rate("nontrauma_severe")
+    # 상해사망 광의: 손상 입원율 × 치료결과 사망분율(treatment_outcome)
+    hosp = rates.conscript_item_rate("hospitalization")
+    death_inj_broad = hosp * rates.injury_death_outcome_share("남자")
+
+    df = pd.DataFrame({"상해사망_협의": death_inj, "상해사망_광의": death_inj_broad,
+                       "질병사망": death_dis, "전체사망": death_all,
+                       "비외상발생": nontrauma}).dropna()
+    df["사망합≤전체"] = (df["상해사망_광의"] + df["질병사망"]) <= df["전체사망"]
+    df["질병사망≤비외상발생"] = df["질병사망"] <= df["비외상발생"]
+    return {
+        "table": df,
+        "all_death_envelope_ok": bool(df["사망합≤전체"].all()),
+        "disease_death_le_incidence_ok": bool(df["질병사망≤비외상발생"].all()),
+    }
 
 
 def _error_metrics(observed: pd.Series, predicted: pd.Series) -> dict:
@@ -87,5 +120,6 @@ def format_report(result: dict) -> str:
         "-" * 70,
         f"MAE 개선: {m['mae_improvement']:+.2f} ({m['mae_improvement_pct']:+.1f}%) "
         f"— 양수면 지역 위험요인 정보가 예측을 개선.",
+        f"95% 예측구간 적중률(coverage): {m['pi_coverage']*100:.0f}%",
     ]
     return "\n".join(lines)

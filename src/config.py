@@ -16,6 +16,23 @@ RAW = DATA / "raw"
 PROCESSED = DATA / "processed"
 OUTPUTS = ROOT / "outputs"
 
+
+def load_env(path: Path | None = None) -> dict:
+    """간단한 .env 파서(외부 의존성 없이). 키는 환경변수로도 읽는다."""
+    import os
+    env = {}
+    path = path or (ROOT / ".env")
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip()
+    # 실제 환경변수가 있으면 우선
+    for k in list(env):
+        env[k] = os.environ.get(k, env[k])
+    return env
+
 # 개인 단위 처리 데이터 (utf-8-sig, BOM 포함)
 CHS_CSV = PROCESSED / "chs_filtered_2021_2025.csv"
 KNHANES_CSV = PROCESSED / "knhanes_filtered_2021_2024.csv"
@@ -89,38 +106,56 @@ CONSCRIPT_KDCA_AGE_BAND = "20-29세"
 #     (trauma_fatality_by_region / trauma_disability_by_region의 분율)로 분해.
 #     분율 = 결과건수/발생건수 (사망 4467/발생 8170 = 54.7%)임을 검증함.
 # ---------------------------------------------------------------------------
+#   [질병 트랙] 비외상성 중증손상 발생률 × 비외상 치명률/장해율로 질병사망·
+#     질병후유장해를 산출(외상 트랙과 동일 구조). 전체 사망률(death_cause)은
+#     질병+외인 합의 envelope로 검증에 사용.
+#
+#   track: '상해'|'질병'|'공통'   role: '보장'(급부)|'기준'(발생 base)|'검증'
 COVERAGE_ITEMS = {
+    # --- 기준 발생(base) ---
     "severe_trauma": {
-        "label": "중증외상 발생",
-        "source": "severe_trauma",          # KDCA 중증외상 발생률
-        "unit": "per_100k",
-    },
-    "death_injury": {
-        "label": "상해사망",
-        "source": "severe_trauma_fatality",  # 발생률 × 치명률(시도)
-        "unit": "per_100k",
-    },
-    "disability": {
-        "label": "후유장해",
-        "source": "severe_trauma_disability",  # 발생률 × 장해율(시도)
-        "unit": "per_100k",
+        "label": "중증외상 발생", "source": "severe_trauma",
+        "track": "상해", "role": "기준", "unit": "per_100k",
     },
     "nontrauma_severe": {
-        "label": "비외상 중증질환",
-        "source": "nontrauma",              # KDCA 비외상 중증질환 발생률
-        "unit": "per_100k",
+        "label": "비외상 중증 발생", "source": "nontrauma",
+        "track": "질병", "role": "기준", "unit": "per_100k",
+    },
+    # --- 상해 트랙 보장 ---
+    "death_injury": {
+        "label": "상해사망", "source": "severe_trauma_fatality",
+        "track": "상해", "role": "보장", "unit": "per_100k",
+    },
+    "disability": {
+        "label": "상해후유장해", "source": "severe_trauma_disability",
+        "track": "상해", "role": "보장", "unit": "per_100k",
     },
     "fracture": {
-        "label": "골절",
-        "source": "discharge_injury",       # KDCA 퇴원손상 × 골절분율
-        "unit": "per_100k",
+        "label": "골절", "source": "discharge_injury",
+        "track": "상해", "role": "보장", "unit": "per_100k",
     },
     "hospitalization": {
-        "label": "손상 입원",
-        "source": "discharge_injury",       # KDCA 퇴원손상 전체(입원일당 근사)
-        "unit": "per_100k",
+        "label": "손상 입원", "source": "discharge_injury",
+        "track": "상해", "role": "보장", "unit": "per_100k",
+    },
+    # --- 질병 트랙 보장 ---
+    "death_disease": {
+        "label": "질병사망", "source": "nontrauma_fatality",
+        "track": "질병", "role": "보장", "unit": "per_100k",
+    },
+    "disease_disability": {
+        "label": "질병후유장해", "source": "nontrauma_disability",
+        "track": "질병", "role": "보장", "unit": "per_100k",
+    },
+    # --- 검증(envelope) ---
+    "death_all": {
+        "label": "전체사망(검증)", "source": "death_cause",
+        "track": "공통", "role": "검증", "unit": "per_100k",
     },
 }
+
+# 보장(급부) 항목만 — 예산·표 산출의 기본 집합
+BENEFIT_ITEMS = [k for k, v in COVERAGE_ITEMS.items() if v["role"] == "보장"]
 
 # ---------------------------------------------------------------------------
 # 정직성 라벨 (모든 산출물에 부착)

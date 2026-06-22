@@ -40,6 +40,14 @@ class EcologicalFit:
     stds: pd.Series = field(repr=False)    # 표준화 전 예측변수 SD
     n_obs: int = 0
     pseudo_r2: float = float("nan")   # 편차 설명 비율(deviance explained)
+    cov: pd.DataFrame = field(default=None, repr=False)  # 모수 공분산(과산포 반영)
+    scale: float = 1.0                # quasi-Poisson 과산포 scale φ
+
+    def _design(self, X: pd.DataFrame) -> pd.DataFrame:
+        """표준화 설계행렬(const 포함, coef 순서)."""
+        z = (X[self.predictors] - self.means) / self.stds
+        z.insert(0, "const", 1.0)
+        return z[self.coef.index]
 
     def linear_predictor(self, X: pd.DataFrame) -> pd.Series:
         """원척도 위험요인 값 → 상대 로그위험(절편 제외, 표준화 후 가중합)."""
@@ -50,6 +58,28 @@ class EcologicalFit:
     def predict_rate_per_100k(self, X: pd.DataFrame) -> pd.Series:
         """원척도 위험요인 값 → 예측 발생률(인구 10만명당). 절편 포함."""
         return np.exp(self.coef["const"] + self.linear_predictor(X)) * 1e5
+
+    def predict_rate_ci(self, X: pd.DataFrame, z: float = 1.96,
+                        exposure: np.ndarray | pd.Series | None = None) -> pd.DataFrame:
+        """예측 발생률(10만명당)과 95% 구간.
+
+        SE(eta)² = xᵀVx (모수 불확실성). exposure(인구)가 주어지면 관측 발생률에
+        대한 **예측구간**으로, 과산포·표본변동 φ/μ_count 를 더한다(μ_count=rate×pop).
+        없으면 평균에 대한 신뢰구간.
+        """
+        Xd = self._design(X)
+        eta = Xd.values @ self.coef.values
+        V = self.cov.values
+        var = np.einsum("ij,jk,ik->i", Xd.values, V, Xd.values)
+        if exposure is not None:
+            mu_count = np.exp(eta) * np.asarray(exposure)
+            var = var + self.scale / np.maximum(mu_count, 1e-9)
+        se = np.sqrt(var)
+        return pd.DataFrame({
+            "rate": np.exp(eta) * 1e5,
+            "lo": np.exp(eta - z * se) * 1e5,
+            "hi": np.exp(eta + z * se) * 1e5,
+        }, index=X.index)
 
 
 def _region_exposure() -> pd.DataFrame:
@@ -63,10 +93,17 @@ def _region_exposure() -> pd.DataFrame:
     return pd.DataFrame({"count": cnt, "rate_per_100k": rate, "pop": pop})
 
 
-def build_dataset(predictors: list[str] | None = None) -> pd.DataFrame:
-    """시도별 위험요인 유병률 + 발생건수/노출인구 병합 데이터셋."""
+def build_dataset(predictors: list[str] | None = None,
+                  calibrate: bool = False) -> pd.DataFrame:
+    """시도별 위험요인 유병률 + 발생건수/노출인구 병합 데이터셋.
+
+    calibrate=True 이면 KNHANES 측정값으로 CHS 자가보고 유병률을 보정한다.
+    """
     predictors = predictors or DEFAULT_PREDICTORS
     prev = aggregate.region_risk_prevalence(factors=predictors)
+    if calibrate:
+        from . import calibration
+        prev = calibration.apply_calibration(prev)
     expo = _region_exposure()
     return prev.join(expo, how="inner").dropna(subset=predictors + ["count", "pop"])
 
@@ -107,13 +144,15 @@ def fit_dataset(data: pd.DataFrame, predictors: list[str]) -> EcologicalFit:
         stds=stds,
         n_obs=len(data),
         pseudo_r2=float(pseudo),
+        cov=res.cov_params(),
+        scale=float(res.scale),
     )
 
 
-def fit(predictors: list[str] | None = None) -> EcologicalFit:
+def fit(predictors: list[str] | None = None, calibrate: bool = False) -> EcologicalFit:
     """생태학적 포아송 회귀를 적합한다(전체 시도)."""
     predictors = predictors or DEFAULT_PREDICTORS
-    data = build_dataset(predictors)
+    data = build_dataset(predictors, calibrate=calibrate)
     return fit_dataset(data, predictors)
 
 
