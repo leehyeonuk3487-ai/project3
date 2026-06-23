@@ -172,6 +172,19 @@ def nontrauma_outcome_surface(outcome: str) -> pd.DataFrame:
     return out.drop(columns=["share"])
 
 
+def m0_mortality_surface(category: str) -> pd.DataFrame:
+    """M0 사인분류 직접 사망률 surface (질병/외인/자살, 시도×age5, 20대 남성).
+
+    category: 'disease'(질병사망) | 'external'(상해사망, 자살제외) | 'suicide'(면책).
+    KOSIS 사인분류 사망자수 ÷ 인구추계 person-years(2021–24 풀링) × 100k, 소셀은
+    Marshall 경험적 베이즈로 안정화. 기존 proxy(중증외상×치명률·비외상×치명률)를
+    직접 관측 사인별 사망률로 대체한다(통계 백본은 그대로 이 surface를 소비).
+    """
+    from ..data import mortality
+    surf = mortality.mortality_rate_surface(category, eb_shrink=True)
+    return surf[["sido", "sex", "age5", "rate_per_100k", "rate_per_1000py", "year", "source"]]
+
+
 def death_all_surface() -> pd.DataFrame:
     """전체 사망률 surface (KOSIS 사망원인, 시도×성×5세연령).
 
@@ -331,6 +344,8 @@ def coverage_rate_surface(item: str) -> pd.DataFrame:
         surf = nontrauma_outcome_surface("disability")
     elif src == "discharge_injury":
         surf = discharge_surface(item)
+    elif src in ("m0_disease", "m0_external", "m0_suicide"):
+        surf = m0_mortality_surface(src.split("_", 1)[1])
     elif src == "death_cause":
         surf = death_all_surface()
     else:

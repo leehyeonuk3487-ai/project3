@@ -45,9 +45,9 @@ DISCHARGE_DIR = RAW / "kdca_discharge_injury"
 # KOSIS
 POPULATION_CSV = RAW / "kosis_population" / "population_projection_sex_age5_region.csv"
 DEATH_CAUSE_CSV = RAW / "kosis_death_cause" / "death_cause_by_region_sex_age5.csv"
-# M0: 104 사인분류 재추출 드롭인 위치(현재 부재 — KOSIS egress 차단으로 재추출 불가).
-#     스키마: [사망원인(코드/명), 시도, 성, 연령, 연도들…] (사망률 십만명당 또는 사망자수)
-DEATH_CAUSE_BY_CAUSE_CSV = RAW / "kosis_death_cause" / "death_cause_by_cause_region_sex_age5.csv"
+# M0: 사인분류 사망(시도×사인×성×5세연령×연도, 사망자수+사망률, ICD 코드 동반).
+#     22개 상호배타 leaf — 질병/외인/자살/기타 4범주 직접 분리(src/data/mortality.py).
+DEATH_CAUSE_BY_CAUSE_CSV = RAW / "kosis_death_cause" / "death_cause_by_region_sex_age5_detail.csv"
 
 # 병무청
 MMA_DIR = RAW / "mma_judgment_status"
@@ -126,7 +126,7 @@ COVERAGE_ITEMS = {
     },
     # --- 상해 트랙 보장 ---
     "death_injury": {
-        "label": "상해사망", "source": "severe_trauma_fatality",
+        "label": "상해사망", "source": "m0_external",
         "track": "상해", "role": "보장", "unit": "per_100k",
     },
     "disability": {
@@ -143,12 +143,17 @@ COVERAGE_ITEMS = {
     },
     # --- 질병 트랙 보장 ---
     "death_disease": {
-        "label": "질병사망", "source": "nontrauma_fatality",
+        "label": "질병사망", "source": "m0_disease",
         "track": "질병", "role": "보장", "unit": "per_100k",
     },
     "disease_disability": {
         "label": "질병후유장해", "source": "nontrauma_disability",
         "track": "질병", "role": "보장", "unit": "per_100k",
+    },
+    # --- 자살(면책) — 보장·예산 미포함, envelope·정직성 노트에만 ---
+    "death_suicide_excluded": {
+        "label": "자살사망(면책)", "source": "m0_suicide",
+        "track": "면책", "role": "면책", "unit": "per_100k",
     },
     # --- 검증(envelope) ---
     "death_all": {

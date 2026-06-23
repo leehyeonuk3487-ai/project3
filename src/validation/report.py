@@ -62,29 +62,35 @@ def loro_calibration(predictors: list[str] | None = None) -> dict:
 
 
 def disease_track_consistency() -> dict:
-    """질병 트랙 정합성 점검.
+    """질병/상해 트랙 정합성 점검 (M0 직접 사망률 기준).
 
-    각 시도 20대 남성에 대해 (상해사망+질병사망) ≤ 전체사망(검증) 인지,
-    질병사망 ≤ 비외상 발생 인지 확인한다.
+    M0로 질병사망=external 외 disease 직접, 상해사망=external(자살제외) 직접이 되었다.
+    각 시도 20대 남성에 대해:
+      · (상해사망+질병사망+자살+기타) ≈ 전체사망(±오차) — 4범주 partition envelope
+      · (상해사망+질병사망) ≤ 전체사망 — 보장 트랙은 전체사망 이내
+      · 질병사망 ≤ 비외상 발생 — 사망은 발생의 부분집합
+    자살(면책)은 분리 추적해 보장합에 미포함됨을 함께 보고한다.
     """
     from ..models import rates
-    death_inj = rates.conscript_item_rate("death_injury")     # 중증외상 사망(협의)
-    death_dis = rates.conscript_item_rate("death_disease")
+    from ..data import mortality
+    death_inj = rates.conscript_item_rate("death_injury")          # external 직접
+    death_dis = rates.conscript_item_rate("death_disease")         # disease 직접
+    death_sui = rates.conscript_item_rate("death_suicide_excluded")  # 면책
     death_all = rates.conscript_item_rate("death_all")
     nontrauma = rates.conscript_item_rate("nontrauma_severe")
-    # 상해사망 광의: 손상 입원율 × 치료결과 사망분율(treatment_outcome)
-    hosp = rates.conscript_item_rate("hospitalization")
-    death_inj_broad = hosp * rates.injury_death_outcome_share("남자")
 
-    df = pd.DataFrame({"상해사망_협의": death_inj, "상해사망_광의": death_inj_broad,
-                       "질병사망": death_dis, "전체사망": death_all,
+    df = pd.DataFrame({"상해사망": death_inj, "질병사망": death_dis,
+                       "자살_면책": death_sui, "전체사망": death_all,
                        "비외상발생": nontrauma}).dropna()
-    df["사망합≤전체"] = (df["상해사망_광의"] + df["질병사망"]) <= df["전체사망"]
+    df["보장합(상해+질병)"] = df["상해사망"] + df["질병사망"]
+    df["보장합≤전체"] = df["보장합(상해+질병)"] <= df["전체사망"]
     df["질병사망≤비외상발생"] = df["질병사망"] <= df["비외상발생"]
     return {
         "table": df,
-        "all_death_envelope_ok": bool(df["사망합≤전체"].all()),
+        "coverage_le_all_death_ok": bool(df["보장합≤전체"].all()),
         "disease_death_le_incidence_ok": bool(df["질병사망≤비외상발생"].all()),
+        "suicide_excluded_from_coverage": "death_suicide_excluded는 role=면책 → BENEFIT_ITEMS 제외",
+        "m0_envelope": mortality.envelope_check(),
     }
 
 

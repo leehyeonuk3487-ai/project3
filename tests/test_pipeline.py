@@ -45,9 +45,12 @@ def test_mma_loaders():
 def test_rate_surface_positive_and_decomposed():
     table = rates.conscript_rate_table()
     assert (table.fillna(0) >= 0).all().all()
-    assert (table["상해사망"] < table["중증외상 발생"]).all()
-    # 질병 트랙 존재
+    # 상해사망·질병사망(M0 직접)은 전체사망 이내 (부분집합 불변식).
+    assert (table["상해사망"] < table["전체사망(검증)"]).all()
+    assert (table["질병사망"] < table["전체사망(검증)"]).all()
+    # 질병 트랙 + 자살(면책) 분리 존재
     assert "질병사망" in table.columns and "질병후유장해" in table.columns
+    assert "자살사망(면책)" in table.columns
 
 
 def test_region_disparity_meaningful():
@@ -125,8 +128,10 @@ def test_loro_calibration_and_pi():
 
 def test_disease_track_consistency():
     con = report.disease_track_consistency()
-    assert con["all_death_envelope_ok"]
+    assert con["coverage_le_all_death_ok"]
     assert con["disease_death_le_incidence_ok"]
+    # M0 4범주 partition이 전체사망과 ±1% 이내
+    assert con["m0_envelope"]["rel_error_pct"] < 1.0
 
 
 # --- API + 외부 의존성 ---------------------------------------------------
@@ -154,14 +159,40 @@ def test_m1_bmi_wired_and_knhanes_features():
     assert not any("inj" in c.lower() or "손상" in c for c in kf.columns)
 
 
-def test_m0_cause_mapping_and_blocker():
-    # M0: 분류 규칙 정확 + 데이터 부재 보고
-    assert mortality.classify_cause("X70") == "suicide"      # 자살 분리
-    assert mortality.classify_cause("C34") == "disease"
-    assert mortality.classify_cause("V89") == "injury"
-    assert mortality.classify_cause("악성신생물(암)") == "disease"
-    assert mortality.available() is False                    # 104항목 파일 부재
-    assert mortality.load_mortality_by_cause() is None        # 폴백
+def test_m0_cause_mapping_and_separation():
+    # M0: ICD 코드 결정적 매핑 (추측 없음)
+    assert mortality.classify_cause("고의적 자해(자살) (X60-X84)") == "suicide"
+    assert mortality.classify_cause("신생물 (C00-D48)") == "disease"
+    assert mortality.classify_cause("운수사고 (V01-V99)") == "external"
+    assert mortality.classify_cause("가해(타살) (X85-Y09)") == "external"   # X85>84 → 자살 아님
+    assert mortality.classify_cause("달리 분류되지 않은 증상, 징후 (R00-R99)") == "other"
+    # 자살은 external과 분리 (★자살을 외인에 합치지 않음)
+    assert mortality.classify_cause("X70") == "suicide"
+    assert mortality.classify_cause("X45") == "external"
+    # 데이터 적재 + 4범주 분리
+    assert mortality.available() is True
+    df = mortality.load_mortality_by_cause()
+    assert set(df["category"].unique()) == {"disease", "external", "suicide", "other"}
+
+
+def test_m0_envelope_mece_and_eb():
+    # MECE: 4범주 사망자수 합 = 전체사망('계') ±오차
+    env = mortality.envelope_check()
+    assert env["rel_error_pct"] < 0.1            # 0.015% 수준
+    # 자살이 20대 남성 최다 사인 (면책 분리 대상)
+    summ = mortality.four_category_summary().set_index("범주")
+    assert summ.loc["suicide", "사망_4년"] > summ.loc["disease", "사망_4년"]
+    # 경험적 베이즈가 소셀 변동을 전국율 쪽으로 축소 (결정적 → 재현성)
+    raw = mortality.mortality_rate_surface("external", eb_shrink=False)
+    eb = mortality.mortality_rate_surface("external", eb_shrink=True)
+    j = raw.merge(eb, on=["sido", "age5"], suffixes=("_raw", "_eb"))
+    nat = (raw["deaths"].sum() / raw["py"].sum()) * 1e5
+    spread_raw = (j["rate_per_100k_raw"] - nat).abs().mean()
+    spread_eb = (j["rate_per_100k_eb"] - nat).abs().mean()
+    assert spread_eb < spread_raw               # 전국율 쪽으로 수축
+    # 결정적(난수 미사용) → 두 번 호출 동일
+    eb2 = mortality.mortality_rate_surface("external", eb_shrink=True)
+    assert eb["rate_per_100k"].round(9).tolist() == eb2["rate_per_100k"].round(9).tolist()
 
 
 def test_m3_panel_gbm_vs_baseline():

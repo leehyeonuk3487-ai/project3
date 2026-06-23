@@ -48,8 +48,11 @@ def main() -> None:
 
     print(section_line); print("질병 트랙 정합성 점검")
     con = report.disease_track_consistency()
-    print(f"  (상해사망+질병사망) ≤ 전체사망(검증): {con['all_death_envelope_ok']}")
+    print(f"  (상해사망+질병사망) ≤ 전체사망(검증): {con['coverage_le_all_death_ok']}")
     print(f"  질병사망 ≤ 비외상 발생: {con['disease_death_le_incidence_ok']}")
+    env = con['m0_envelope']
+    print(f"  M0 4범주 envelope: 합 {env['category_sum_deaths']:,} vs 전체 "
+          f"{env['all_cause_deaths']:,} (오차 {env['rel_error_pct']}%)")
 
     print("\n" + "-" * 78)
     print("대시보드 실행:")

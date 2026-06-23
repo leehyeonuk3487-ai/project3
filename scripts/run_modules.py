@@ -13,7 +13,7 @@ import pandas as pd
 
 from src import config
 from src.data import loaders, mortality
-from src.models import panel, population
+from src.models import panel, population, rates
 
 pd.set_option("display.width", 150)
 
@@ -24,15 +24,23 @@ def line(t): print("\n" + "=" * 78 + f"\n{t}\n" + "=" * 78)
 def main() -> None:
     print(config.HONESTY_NOTE)
 
-    line("M0 — 사망원인 104항목 → 4범주(질병/상해/자살/기타)")
-    print(mortality.mapping_table().to_string(index=False))
-    st = mortality.status()
-    print(f"\n재추출 파일 존재: {st['by_cause_available']}  ({st['current_file']})")
-    print(f"블로커: {st['blocker']}")
-    print(f"필요 파일: {st['needed_csv']}")
-    print(f"재추출 사양: {st['reextract_spec']}")
-    if mortality.available():
-        print("→ 드롭인 감지: 4범주 발생률 산출 가능")
+    line("M0 — 사망원인 → 4범주(질병/상해/자살/기타) 분리 + 직접 사망률")
+    print("4범주 분해 (2021–24, 남자 20대, 전국):")
+    print(mortality.four_category_summary().to_string(index=False))
+    env = mortality.envelope_check()
+    print(f"\nMECE envelope: 4범주합 {env['category_sum_deaths']:,}명 vs 전체사망(계) "
+          f"{env['all_cause_deaths']:,}명  (오차 {env['rel_error_pct']}%)")
+    cov = rates.conscript_item_rate
+    inj, dis = cov("death_injury"), cov("death_disease")
+    print(f"트랙 연결: 상해사망(external 직접) 전국 {inj.mean():.4f} / "
+          f"질병사망(disease 직접) {dis.mean():.4f} (1,000명·년) — 비외상 proxy 폐기")
+    print("자살(X60–84)은 death_suicide_excluded(면책) → 예산·보장 미포함, envelope만.")
+    # 상위 사인 sanity check (순위표 검증용)
+    top = (mortality.load_mortality_by_cause().groupby("cause")["deaths"].sum()
+           .sort_values(ascending=False).head(5))
+    print("상위 사인(검증용 순위):")
+    for c, n in top.items():
+        print(f"   {int(n):5d}  {c}")
 
     line("M1 — 병무청 BMI 연결 + KNHANES 피처 적재")
     prof = population.cohort_profile("경기", 2024)

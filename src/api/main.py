@@ -124,8 +124,9 @@ def api_calibration():
 @app.get("/api/consistency")
 def api_consistency():
     con = report.disease_track_consistency()
-    return {"all_death_envelope_ok": con["all_death_envelope_ok"],
+    return {"coverage_le_all_death_ok": con["coverage_le_all_death_ok"],
             "disease_death_le_incidence_ok": con["disease_death_le_incidence_ok"],
+            "m0_envelope": con["m0_envelope"],
             "rows": _records(con["table"].round(4))}
 
 
