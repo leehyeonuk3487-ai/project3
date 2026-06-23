@@ -4,10 +4,10 @@ numpy>=1.24
 
 # Modeling (slice 2-3)
 statsmodels>=0.14      # Poisson/NB ecological regression
-scikit-learn>=1.3      # stratification helpers, calibration metrics
+scikit-learn>=1.3      # M2 logistic + stratification helpers, calibration metrics
 
-# ML modules (M3 panel GBM; M2 when injury labels available)
-lightgbm>=4.0          # gradient-boosted cell-panel incidence surface
+# ML modules (M2 injury-risk classifier; M3 panel GBM)
+lightgbm>=4.0          # M2 injury-risk + M3 cell-panel incidence surface
 
 # API + dashboard (slice 3)
 fastapi>=0.110

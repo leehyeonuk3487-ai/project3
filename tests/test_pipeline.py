@@ -208,6 +208,40 @@ def test_m3_panel_gbm_vs_baseline():
         assert (s["rate_per_100k"] > 0).all()
 
 
+# --- M2: 개인 손상위험 ML --------------------------------------------------
+
+def test_m2_label_consistency_and_pooling():
+    from src.models import injury_ml
+    feat = injury_ml.load_features()
+    # 라벨 이진, 유효표본·유병률(작업지시 수치와 일치)
+    assert set(feat["y"].unique()) == {0, 1}
+    assert len(feat) == 5730 and int(feat["y"].sum()) == 386
+    # 전 연령·전성별 풀링(20대만 학습 금지) — 학습표본이 20대남보다 크다
+    m20 = feat[(feat["male"] == 1) & feat["age"].between(20, 29)]
+    assert len(m20) == 1086 and len(feat) > len(m20)
+    # 고정 예측변수 집합(누수 변수 미포함)
+    assert injury_ml.FEATURES == ["age", "male", "HE_BMI", "sm_presnt",
+                                  "dr_month", "pa_aerobic", "htn_dx", "dm_dx"]
+
+
+def test_m2_auc_baseline_and_reproducible():
+    from src.models import injury_ml
+    r1 = injury_ml.evaluate()
+    r2 = injury_ml.evaluate()
+    # 재현성(시드 고정)
+    assert r1.holdout["logit"]["auc"] == r2.holdout["logit"]["auc"]
+    assert r1.kfold["lgbm"]["auc_mean"] == r2.kfold["lgbm"]["auc_mean"]
+    # 베이스라인·두 모델 모두 AUC 보고(0.4~0.8 합리 범위, modest 허용)
+    for m in ("baseline", "logit", "lgbm"):
+        assert 0.4 < r1.kfold[m]["auc_mean"] < 0.85
+    # 비가중 캘리브레이션: 예측평균이 관측 유병률에 근사(절대확률 교정)
+    h = r1.holdout["logit"]
+    assert abs(h["pred_mean_cal"] - h["obs_rate"]) < 0.03
+    # 집단 요약만(개인 점수 키 부재)
+    assert set(r1.group_risk) >= {"n", "observed_rate", "pred_mean"}
+    assert "individual_scores" not in r1.group_risk
+
+
 def test_mma_api_client_graceful():
     # egress 차단 환경에서도 오류 없이 상태/폴백을 반환해야 한다
     st = mma_api.status()

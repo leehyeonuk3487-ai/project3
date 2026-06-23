@@ -63,9 +63,23 @@ def main() -> None:
     print(f"판정: {r.note}")
     print("⚠️ 지역(시도) joint 관측 부재 → 공간 CV 불가, 비례보정 지역 백본 유지.")
 
-    line("M2 — 개인 손상위험 ML (모듈 B)")
-    print("블로커: KNHANES 처리본에 손상(IJMT) 결과변수가 없음 → 지도학습 라벨 부재.")
-    print("임의구현 금지 원칙에 따라 결과변수 임의대체 없이 보류(데이터 보강 필요).")
+    line("M2 — KNHANES 개인 손상위험 ML (집단 가격용)")
+    from src.models import injury_ml
+    m2 = injury_ml.evaluate()
+    print(f"결과변수 ij_expr(=AC1_yr 정제) 유효 N={m2.n_obs}, 양성 {m2.n_pos} "
+          f"({m2.prevalence*100:.1f}%). 전 연령·전성별(15–39) 풀링 학습.")
+    print("계층 5-fold AUC / 연도(2024) 홀드아웃 AUC:")
+    for name, lab in [("baseline", "베이스라인(age+sex)"), ("logit", "L2 로지스틱"),
+                      ("lgbm", "LightGBM")]:
+        print(f"  {lab:18s} kfold {m2.kfold[name]['auc_mean']}±{m2.kfold[name]['auc_std']}"
+              f"  holdout {m2.holdout[name]['auc']}  (Brier {m2.holdout[name]['brier']})")
+    print(f"채택(홀드아웃 기준): {m2.adopt} — {m2.note}")
+    print("위험요인 OR(L2):",
+          {r['위험요인']: r['OR'] for _, r in m2.odds_ratios.head(4).iterrows()})
+    print("LightGBM gain%:",
+          {r['위험요인']: r['gain%'] for _, r in m2.importance.head(4).iterrows()})
+    print(f"20대남 집단위험(교정): 관측 {m2.group_risk['observed_rate']} / "
+          f"예측평균 {m2.group_risk['pred_mean']} (개인 스코어링 아님)")
 
 
 if __name__ == "__main__":
