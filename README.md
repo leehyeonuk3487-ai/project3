@@ -129,8 +129,20 @@ uvicorn src.api.main:app --reload   #  http://127.0.0.1:8000
   비례보정(로그가산) 베이스라인을 **시간 홀드아웃 RMSE 0.337→0.219, k-fold
   0.247→0.133으로 이겨 채택**. ⚠️ 지역 joint 관측 부재로 공간 CV 불가 → 지역은
   비례보정 백본 유지.
+- **모듈 A 셀 패널 발생률 GBM** (`models/cell_panel.py`) — M2의 개인예측 음성결과를
+  보완하는 **집단(셀) 발생률 학습·검증**. M0의 시도×성×연령×연도 joint 사망으로 M3가
+  불가했던 **leave-one-시도-out 공간 CV + 최근연도 시간 CV**를 LightGBM Poisson(offset=
+  log PY)으로 수행, 비례보정·단순평균 베이스라인과 정직 비교. **채택 게이트=공간·시간
+  모두 deviance↓ + 캘리브레이션 안정**. 결과: ① 전체사인(2,890셀)은 단순 구조모델
+  (age×sex×year)로 충분(GBM 미채택), ② 외인 상해사망(20대남 136셀)은 공간CV에서
+  GBM 우세(음주·비만 기여)이나 소표본 시간 캘리브레이션 불안정 → **둘 다 baseline 유지**
+  (과적합 억지 추월 안 함). 신규 데이터 없음.
 
-실행: `python -m scripts.run_modules` (M0~M3 리포트).
+### AI 성능 2층 서사 (대시보드 ⑦ 패널)
+**개인 예측은 약함(M2 AUC≈0.56, age+sex 미달) → 집단 발생률을 학습모델로 추정·공간시간
+CV 검증(모듈 A).** 두 모듈 모두 baseline 대비 정직 비교 결과를 그대로 표기한다(`/api/ai_performance`).
+
+실행: `python -m scripts.run_modules` (M0~M3 + 모듈 A 리포트).
 
 ## 한계·정직성
 

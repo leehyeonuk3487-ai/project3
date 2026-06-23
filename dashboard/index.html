@@ -97,6 +97,20 @@
     <h2 style="margin-top:16px">⑥ 인구절벽 예산 투영 (2024→2034)</h2>
     <canvas id="projChart"></canvas>
   </section>
+
+  <section class="card full">
+    <h2>⑦ AI 모델 성능 검증 (2층: 집단 발생률 학습 + 개인 예측 음성결과)</h2>
+    <p class="muted" id="aiFraming"></p>
+    <h3>모듈 A — 셀 패널 발생률 GBM (공간·시간 CV, baseline 대비 정직 비교)</h3>
+    <div id="aiModuleA"></div>
+    <h3 style="margin-top:14px">M2 — 개인 손상위험 ML (정직한 음성결과)</h3>
+    <div class="metric">
+      <div><b id="m2auc">–</b><span>홀드아웃 AUC(로지스틱)</span></div>
+      <div><b id="m2base">–</b><span>베이스라인 AUC(age+sex)</span></div>
+      <div><b id="m2adopt">–</b><span>채택 모델</span></div>
+    </div>
+    <div class="muted" id="m2note"></div>
+  </section>
 </main>
 
 <script>
@@ -163,6 +177,33 @@ async function init(){
     o.value=s.name; o.textContent=`${s.name} (${s.sido})`; sel.appendChild(o); });
   document.getElementById("calcBtn").onclick = calcBudget;
   calcBudget();
+  renderAI();
+}
+
+async function renderAI(){
+  const ai = await getJSON("/api/ai_performance");
+  document.getElementById("aiFraming").textContent = ai.framing;
+  let html = "";
+  const labels = {allcause:"전체사인 (2,890셀 · 방법론 검증)",
+                  external:"외인 상해사망 (20대남 136셀 · 도메인 한계)"};
+  for (const tgt of ["allcause","external"]){
+    const m = ai.module_a[tgt];
+    html += `<h4>타깃: ${labels[tgt]} — GBM 채택: <b>${m.adopt_gbm?"예":"아니오(baseline 유지)"}</b></h4>`;
+    html += `<table><tr><th>모델</th><th>공간CV deviance</th><th>공간 calib</th><th>시간CV deviance</th><th>시간 calib</th></tr>`;
+    for (const [mk,ml] of [["gbm","GBM(Poisson)"],["proportional","비례보정(백본)"],["simple_mean","단순평균(성·연령·연도)"]]){
+      html += `<tr><td>${ml}</td><td>${fmt(m.spatial[mk].deviance,3)}</td><td>${fmt(m.spatial[mk].calib_slope,2)}</td>`+
+              `<td>${fmt(m.temporal[mk].deviance,3)}</td><td>${fmt(m.temporal[mk].calib_slope,2)}</td></tr>`;
+    }
+    html += `</table>`;
+    const imp = m.importance.slice(0,4).map(r=>`${r.feature} ${fmt(r["gain%"],1)}%`).join(", ");
+    html += `<div class="muted">피처 중요도(gain): ${imp}<br>${m.note}</div>`;
+  }
+  document.getElementById("aiModuleA").innerHTML = html;
+  const m2 = ai.m2_individual;
+  document.getElementById("m2auc").textContent = fmt(m2.holdout.logit.auc,3);
+  document.getElementById("m2base").textContent = fmt(m2.holdout.baseline.auc,3);
+  document.getElementById("m2adopt").textContent = m2.adopt;
+  document.getElementById("m2note").textContent = m2.note;
 }
 
 async function calcBudget(){

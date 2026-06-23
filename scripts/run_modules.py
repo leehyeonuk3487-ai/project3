@@ -81,6 +81,21 @@ def main() -> None:
     print(f"20대남 집단위험(교정): 관측 {m2.group_risk['observed_rate']} / "
           f"예측평균 {m2.group_risk['pred_mean']} (개인 스코어링 아님)")
 
+    line("모듈 A — 셀 패널 발생률 GBM (M2 대체 보강, 공간·시간 CV)")
+    from src.models import cell_panel
+    print("M3가 불가했던 leave-one-시도-out 공간 CV를 M0 시도×성×연령×연도 joint 사망으로 수행.")
+    for tgt, lab in [("allcause", "전체사인(2,890셀·방법론 검증)"),
+                     ("external", "외인 상해사망(20대남 136셀·도메인 한계)")]:
+        a = cell_panel.evaluate(tgt)
+        print(f"\n[{lab}] 셀 {a.n_cells}, 0-카운트 {a.n_zero_pct}%")
+        for cv, cvl in [("spatial", "공간CV"), ("temporal", "시간CV")]:
+            d = getattr(a, cv)
+            print(f"  {cvl}: GBM dev {d['gbm']['deviance']} (calib {d['gbm']['calib_slope']}) | "
+                  f"비례보정 {d['proportional']['deviance']} | 단순평균 {d['simple_mean']['deviance']}")
+        print(f"  채택: GBM={a.adopt_gbm} — {a.note}")
+        print("  피처 중요도:",
+              {r['feature']: r['gain%'] for _, r in a.importance.head(3).iterrows()})
+
 
 if __name__ == "__main__":
     main()

@@ -16,7 +16,8 @@ from pydantic import BaseModel
 
 from .. import config
 from ..data import benefits
-from ..models import calibration, ecological, population, rates, stratify
+from ..models import (calibration, cell_panel, ecological, injury_ml,
+                      population, rates, stratify)
 from ..optimize import budget
 from ..validation import report
 
@@ -128,6 +129,35 @@ def api_consistency():
             "disease_death_le_incidence_ok": con["disease_death_le_incidence_ok"],
             "m0_envelope": con["m0_envelope"],
             "rows": _records(con["table"].round(4))}
+
+
+@lru_cache(maxsize=1)
+def _ai_performance():
+    """AI 성능 2층: 모듈 A(집단 셀 발생률 학습·공간시간CV) + M2(개인 손상 ML, 음성결과)."""
+    mods = {}
+    for tgt in ("allcause", "external"):
+        r = cell_panel.evaluate(tgt)
+        mods[tgt] = {"n_cells": r.n_cells, "n_zero_pct": r.n_zero_pct,
+                     "spatial": r.spatial, "temporal": r.temporal,
+                     "adopt_gbm": r.adopt_gbm, "note": r.note,
+                     "importance": _records(r.importance, reset_index=False)}
+    m2 = injury_ml.evaluate()
+    return {
+        "module_a": mods,
+        "m2_individual": {
+            "n_obs": m2.n_obs, "n_pos": m2.n_pos, "prevalence": m2.prevalence,
+            "kfold": m2.kfold, "holdout": m2.holdout, "adopt": m2.adopt,
+            "note": m2.note,
+            "odds_ratios": _records(m2.odds_ratios, reset_index=False)},
+        "framing": ("2층 구조: 개인 예측은 약함(M2 AUC≈0.56, age+sex 베이스라인 미달) → "
+                    "집단(셀) 발생률을 학습모델로 추정·공간시간 CV 검증(모듈 A). "
+                    "두 모듈 모두 baseline 대비 정직 비교 결과를 그대로 보고한다."),
+    }
+
+
+@app.get("/api/ai_performance")
+def api_ai_performance():
+    return _ai_performance()
 
 
 @app.get("/api/population")

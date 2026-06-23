@@ -242,6 +242,39 @@ def test_m2_auc_baseline_and_reproducible():
     assert "individual_scores" not in r1.group_risk
 
 
+# --- 모듈 A: 셀 패널 발생률 GBM (공간·시간 CV) ----------------------------
+
+def test_module_a_panel_and_spatial_cv():
+    from src.models import cell_panel
+    # 패널 구성: 시도 차원 포함, 작업지시 확정 셀수
+    pa = cell_panel.build_panel("allcause")
+    assert pa["sido"].nunique() == 17 and len(pa) == 2890
+    assert {"deaths", "py"}.issubset(pa.columns) and (pa["py"] > 0).all()
+    pe = cell_panel.build_panel("external")
+    assert len(pe) == 136 and set(pe["sex"].unique()) == {"남자"}
+    # GBM 예측이 합리적 발생률(폭주 없음): 전체사인 학습 적합
+    booster = cell_panel._fit_gbm(pa)
+    pred = cell_panel._pred_gbm(booster, pa) * 1e5      # per-100k
+    obs = (pa["deaths"] / pa["py"]).values * 1e5
+    assert pred.max() < obs.max() * 3                   # offset 정상(과거 100000/100k 버그 방지)
+
+
+def test_module_a_cv_baselines_and_adopt():
+    from src.models import cell_panel
+    r = cell_panel.evaluate("allcause")
+    # 공간 CV는 시도 수 만큼 fold → 세 모델 모두 지표 보고
+    for cv in (r.spatial, r.temporal):
+        for m in ("gbm", "proportional", "simple_mean"):
+            assert cv[m]["deviance"] > 0 and "calib_slope" in cv[m]
+    # 채택은 boolean(공간·시간 모두 deviance↓ + 캘리브레이션 안정일 때만)
+    assert isinstance(r.adopt_gbm, bool)
+    # 재현성(시드 고정)
+    assert cell_panel.evaluate("allcause").spatial["gbm"]["deviance"] == \
+        r.spatial["gbm"]["deviance"]
+    # 피처에 지역 행태(CHS) 포함 — 공간 일반화 신호
+    assert "binge_drink" in set(r.importance["feature"])
+
+
 def test_mma_api_client_graceful():
     # egress 차단 환경에서도 오류 없이 상태/폴백을 반환해야 한다
     st = mma_api.status()
