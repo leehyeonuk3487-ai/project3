@@ -16,9 +16,9 @@ from pydantic import BaseModel
 
 from .. import config
 from ..data import benefits
-from ..models import (calibration, cell_panel, ecological, injury_ml,
+from ..models import (calibration, cell_panel, cohort, ecological, injury_ml,
                       population, rates, stratify)
-from ..optimize import budget
+from ..optimize import budget, premium
 from ..validation import report
 
 app = FastAPI(title="군복무 청년 상해보험 리스크·계리 대시보드")
@@ -158,6 +158,38 @@ def _ai_performance():
 @app.get("/api/ai_performance")
 def api_ai_performance():
     return _ai_performance()
+
+
+@lru_cache(maxsize=1)
+def _cohort():
+    s = cohort.summary()
+    return {"risk_index": _records(s["risk_index_table"]),
+            "bmi_selection": {k: _clean(v) for k, v in s["bmi_selection"].items()},
+            "irr_source": _records(s["irr_source"], reset_index=False),
+            "predictors": s["predictors"], "n_regions": s["n_regions"]}
+
+
+@app.get("/api/cohort")
+def api_cohort():
+    """M4 — 코호트 리스크 지수 + 현역 BMI 선택 + 생태회귀 IRR 출처."""
+    return _cohort()
+
+
+@app.get("/api/premium")
+def api_premium(schedule: str = "경기도", alpha: float = premium.DEFAULT_ALPHA,
+                expense_ratio: float = premium.DEFAULT_EXPENSE_RATIO):
+    """M5 — 계리 보험료(순+위험할증+사업비) + 보고치/단순할증 대조."""
+    pr = premium.actuarial_premium(schedule, alpha=alpha, expense_ratio=expense_ratio)
+    return {
+        "schedule": pr.schedule, "sido": pr.sido, "population": pr.population,
+        "net_pc": pr.net_pc, "risk_margin_pc": pr.risk_margin_pc,
+        "expense_ratio": pr.expense_ratio, "gross_pc": pr.gross_pc,
+        "cv": pr.cv, "alpha": pr.alpha, "implied_loading": pr.implied_loading,
+        "reported_pc": _clean(pr.reported_pc), "note": pr.note,
+        "compare": {k: _clean(v) for k, v in premium.compare_to_reported(schedule).items()},
+        "sensitivity": _records(premium.loading_sensitivity(schedule), reset_index=False),
+        "by_item": _records(pr.by_item, reset_index=False),
+    }
 
 
 @app.get("/api/population")

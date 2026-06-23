@@ -275,6 +275,53 @@ def test_module_a_cv_baselines_and_adopt():
     assert "binge_drink" in set(r.importance["feature"])
 
 
+# --- M4: 코호트 리스크 통합·보정 ------------------------------------------
+
+def test_m4_cohort_risk_index():
+    from src.models import cohort
+    idx = cohort.cohort_risk_index()
+    assert len(idx) == 17 and (idx["risk_index"] > 0).all()
+    # 전국 인구가중 평균 = 1.0 (정규화; risk_index 4자리 반올림 오차 허용)
+    w = cohort._conscript_weights().reindex(idx.index)
+    assert abs(np.average(idx["risk_index"], weights=w) - 1.0) < 1e-3
+    # 결정적(재현성)
+    assert cohort.cohort_risk_index()["risk_index"].round(6).tolist() == \
+        idx["risk_index"].round(6).tolist()
+
+
+def test_m4_bmi_selection_and_claims():
+    from src.models import cohort
+    from src.data import benefits
+    sel = cohort.conscript_bmi_selection()
+    # 병무청 BMI≥25 = 과체중+비만, CHS obese≥25 — 둘 다 [0,1], 정의 호환
+    assert 0 < sel["conscript_bmi_ge25"] < 1 and 0 < sel["general_bmi_ge25"] < 1
+    # 통합 청구액: 검증 surface 기준(이중계산 방지), 지수 병기
+    c = cohort.cohort_adjusted_claims(benefits.list_schedules()[0])
+    assert c["per_capita_claims"] > 0 and c["cohort_risk_index"] > 0
+    assert c["apply_index"] is False                 # 기본은 이중계산 없음
+
+
+# --- M5: 계리 보험료 산정 -------------------------------------------------
+
+def test_m5_actuarial_premium_structure():
+    from src.optimize import premium
+    pr = premium.actuarial_premium("경기도")
+    # 순 < 위험할증포함 < 총(사업비), 모두 양수
+    assert 0 < pr.net_pc < pr.net_pc + pr.risk_margin_pc <= pr.gross_pc
+    assert 0 < pr.cv < 1 and pr.implied_loading > 1.0
+    # 결정적
+    assert premium.actuarial_premium("경기도").gross_pc == pr.gross_pc
+
+
+def test_m5_small_pool_higher_loading():
+    from src.optimize import premium
+    big = premium.actuarial_premium("경기도")          # N~98k
+    small = premium.actuarial_premium("강원_화천군")    # N~12k
+    # 소형 풀일수록 변동계수↑ → 1인당 위험할증↑ (신뢰도/풀링 효과)
+    assert small.cv > big.cv
+    assert small.risk_margin_pc > big.risk_margin_pc
+
+
 def test_mma_api_client_graceful():
     # egress 차단 환경에서도 오류 없이 상태/폴백을 반환해야 한다
     st = mma_api.status()

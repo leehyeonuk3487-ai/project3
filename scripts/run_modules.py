@@ -96,6 +96,32 @@ def main() -> None:
         print("  피처 중요도:",
               {r['feature']: r['gain%'] for _, r in a.importance.head(3).iterrows()})
 
+    line("M4 — 코호트 리스크 통합·보정 (집단 단위)")
+    from src.models import cohort
+    idx = cohort.cohort_risk_index()
+    print("시도 20대남 코호트 행태 상대위험 지수(전국 인구가중=1.0):")
+    top = idx["risk_index"].head(3).to_dict(); bot = idx["risk_index"].tail(3).to_dict()
+    print(f"  최고: {top}  /  최저: {bot}  (흡연·비만 주도, 생태회귀 β 적용)")
+    sel = cohort.conscript_bmi_selection()
+    print(f"  현역 BMI≥25 {sel['conscript_bmi_ge25']:.1%}(과체중+비만) vs 일반 20대남 "
+          f"{sel['general_bmi_ge25']:.1%} → {sel['note'][:40]}…")
+    cc = cohort.cohort_adjusted_claims("경기도")
+    print(f"  통합 기대청구액(경기도): 1인당 {cc['per_capita_claims']:,.0f}원 "
+          f"(코호트지수 {cc['cohort_risk_index']}, 이중계산 없음)")
+
+    line("M5 — 계리 보험료 산정 (순+위험할증+사업비)")
+    from src.optimize import premium
+    pr = premium.actuarial_premium("경기도")
+    print(f"경기도 N={pr.population:,}: 순 {pr.net_pc:,.0f} + 위험할증(α={pr.alpha}) "
+          f"{pr.risk_margin_pc:,.0f} → 사업비 {pr.expense_ratio:.0%} → 총 {pr.gross_pc:,.0f}원/인 "
+          f"(환산할증 ×{pr.implied_loading}, CV {pr.cv})")
+    cmp = premium.compare_to_reported("경기도")
+    print(f"  대조: 계리 총 {cmp['actuarial_gross']:,.0f} vs 단순×1.25 {cmp['flat_1.25']:,.0f} "
+          f"vs 보고 {cmp['reported']:,} ({cmp['actuarial_vs_reported%']}% vs 보고)")
+    small = premium.actuarial_premium("강원_화천군")
+    print(f"  소형 풀(화천군 N={small.population:,}): CV {small.cv} → 위험할증 "
+          f"{small.risk_margin_pc:,.0f}원/인 (대형 대비↑ — 신뢰도/풀링 효과)")
+
 
 if __name__ == "__main__":
     main()

@@ -111,6 +111,26 @@
     </div>
     <div class="muted" id="m2note"></div>
   </section>
+
+  <section class="card full">
+    <h2>⑧ M4 — 코호트 리스크 통합 (시도 20대남 행태 상대위험, 전국=1.0)</h2>
+    <p class="muted" id="m4Note"></p>
+    <canvas id="cohortChart"></canvas>
+    <div class="muted" id="m4Bmi" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card full">
+    <h2>⑨ M5 — 계리 보험료 (순보험료 + 위험할증 + 사업비)</h2>
+    <div class="metric">
+      <div><b id="pmNet">–</b><span>순보험료/인</span></div>
+      <div><b id="pmRisk">–</b><span>위험할증/인(α=1)</span></div>
+      <div><b id="pmGross">–</b><span>총보험료/인</span></div>
+      <div><b id="pmReported">–</b><span>보고된 실제</span></div>
+      <div><b id="pmCV">–</b><span>변동계수 CV</span></div>
+    </div>
+    <table id="pmSens"></table>
+    <div class="muted" id="pmNote" style="margin-top:8px"></div>
+  </section>
 </main>
 
 <script>
@@ -178,6 +198,40 @@ async function init(){
   document.getElementById("calcBtn").onclick = calcBudget;
   calcBudget();
   renderAI();
+  renderCohort();
+  renderPremium();
+}
+
+async function renderCohort(){
+  const d = await getJSON("/api/cohort");
+  document.getElementById("m4Note").textContent =
+    `생태회귀 IRR(${d.predictors.join(", ")})을 시도 20대남 행태유병률에 적용 · ${d.n_regions}개 시도 · 집단 단위(개인 아님)`;
+  const rows = d.risk_index;
+  new Chart(document.getElementById("cohortChart"), {
+    type:"bar",
+    data:{ labels: rows.map(r=>r.sido), datasets:[{
+      label:"코호트 리스크 지수(전국=1.0)", data: rows.map(r=>r.risk_index),
+      backgroundColor: rows.map(r=> r.risk_index>=1 ? "hsl(8 70% 55% / .85)" : "hsl(205 70% 55% / .85)") }] },
+    options:{ scales:{ x:{ticks:{color:"#9fb0c0"}}, y:{ticks:{color:"#9fb0c0"}} },
+      plugins:{ legend:{labels:{color:"#e8eef4"}} } }
+  });
+  const b = d.bmi_selection;
+  document.getElementById("m4Bmi").textContent =
+    `현역 BMI≥25 ${(b.conscript_bmi_ge25*100).toFixed(1)}%(과체중+비만) vs 일반 20대남 ${(b.general_bmi_ge25*100).toFixed(1)}% · ${b.note}`;
+}
+
+async function renderPremium(){
+  const p = await getJSON("/api/premium?schedule=" + encodeURIComponent("경기도"));
+  document.getElementById("pmNet").textContent = won(p.net_pc);
+  document.getElementById("pmRisk").textContent = won(p.risk_margin_pc);
+  document.getElementById("pmGross").textContent = won(p.gross_pc);
+  document.getElementById("pmReported").textContent = p.reported_pc ? won(p.reported_pc) : "–";
+  document.getElementById("pmCV").textContent = fmt(p.cv,3);
+  buildTable("pmSens",
+    ["alpha","사업비15%","사업비20%","사업비30%"],
+    ["안전계수 α","사업비 15%","사업비 20%","사업비 30%"],
+    p.sensitivity, {alpha:2}, {"사업비15%":won,"사업비20%":won,"사업비30%":won});
+  document.getElementById("pmNote").textContent = "경기도 기준 · " + p.note + " | " + p.compare.note;
 }
 
 async function renderAI(){
