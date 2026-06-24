@@ -44,6 +44,8 @@ DISCHARGE_DIR = RAW / "kdca_discharge_injury"
 
 # KOSIS
 POPULATION_CSV = RAW / "kosis_population" / "population_projection_sex_age5_region.csv"
+# 주민등록 연앙인구(2005–2019, 시도×남×20-24·25-29) — 모듈 A 외인 패널 과거 분모.
+RESIDENT_POP_CSV = RAW / "kosis_population" / "resident_registration_by_region_sex_age5.csv"
 DEATH_CAUSE_CSV = RAW / "kosis_death_cause" / "death_cause_by_region_sex_age5.csv"
 # M0: 사인분류 사망(시도×사인×성×5세연령×연도, 사망자수+사망률, ICD 코드 동반).
 #     22개 상호배타 leaf — 질병/외인/자살/기타 4범주 직접 분리(src/data/mortality.py).

@@ -218,6 +218,40 @@ def load_population_projection() -> pd.DataFrame:
     return long[["sido", "sex_name", "age5", "year", "value"]]
 
 
+def load_population_resident() -> pd.DataFrame:
+    """주민등록 연앙인구 (2005–2019, 시도×남×20-24·25-29).
+
+    Returns long DataFrame[sido, sex_name, age5, year, value(명, 연앙)].
+    연앙인구이므로 person-years로 직접 사용. 세종은 2012 신설이라 2012–2019만 존재.
+    """
+    raw = pd.read_csv(config.RESIDENT_POP_CSV, encoding="utf-8-sig")
+    raw.columns = [str(c).strip() for c in raw.columns]
+    region_col = next(c for c in raw.columns if "행정구역" in c or "시도" in c)
+    age_cols = [c for c in raw.columns if "세" in c]
+    raw = raw[raw[region_col] != "전국"]
+    long = raw.melt(id_vars=["시점", region_col, "성별"], value_vars=age_cols,
+                    var_name="age5", value_name="value")
+    long["year"] = long["시점"].astype(str).str.extract(r"(\d{4})").astype(int)
+    long["sido"] = long[region_col].map(config.KOSIS_SIDO_ALIASES).fillna(long[region_col])
+    long["sex_name"] = long["성별"].astype(str).str.strip()
+    long["age5"] = long["age5"].map(normalize_age5)
+    long["value"] = pd.to_numeric(
+        long["value"].astype(str).str.replace(",", "").str.strip(), errors="coerce")
+    return long[["sido", "sex_name", "age5", "year", "value"]].dropna(subset=["value"])
+
+
+def load_population_midyear() -> pd.DataFrame:
+    """2005–2024 결합 person-years: 2005–2019 주민등록 연앙 + 2020–2024 추계.
+
+    두 소스는 연도가 disjoint(겹침 없음)라 단순 병합(경계 규칙: 2005–2019=주민등록,
+    2020–2024=추계). 주민등록 범위가 남자 20-24·25-29뿐이라 2005–2019는 그 셀만 제공.
+    """
+    res = load_population_resident()                  # 2005–2019
+    proj = load_population_projection()
+    proj = proj[proj["year"].between(2020, 2024)]     # 2020–2024
+    return pd.concat([res, proj], ignore_index=True)
+
+
 def load_death_cause() -> pd.DataFrame:
     """사망원인 통계 (시도×성×5세, 전체 사인). cp949 인코딩.
 

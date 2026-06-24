@@ -250,8 +250,11 @@ def test_module_a_panel_and_spatial_cv():
     pa = cell_panel.build_panel("allcause")
     assert pa["sido"].nunique() == 17 and len(pa) == 2890
     assert {"deaths", "py"}.issubset(pa.columns) and (pa["py"] > 0).all()
-    pe = cell_panel.build_panel("external")
-    assert len(pe) == 136 and set(pe["sex"].unique()) == {"남자"}
+    pe = cell_panel.build_panel("external")          # 2005–2024 확장 (주민등록+추계 분모)
+    assert len(pe) == 666 and set(pe["sex"].unique()) == {"남자"}
+    assert pe["year"].min() == 2005 and pe["year"].max() == 2024
+    # 세종 2005–2011은 분모 부재로 제외(2012 신설)
+    assert pe[pe["sido"] == "세종"]["year"].min() == 2012
     # GBM 예측이 합리적 발생률(폭주 없음): 전체사인 학습 적합
     booster = cell_panel._fit_gbm(pa)
     pred = cell_panel._pred_gbm(booster, pa) * 1e5      # per-100k
@@ -273,6 +276,24 @@ def test_module_a_cv_baselines_and_adopt():
         r.spatial["gbm"]["deviance"]
     # 피처에 지역 행태(CHS) 포함 — 공간 일반화 신호
     assert "binge_drink" in set(r.importance["feature"])
+
+
+def test_module_a_external_extended_temporal_stable():
+    # 외인 패널 확장(666셀)으로 시간CV 캘리브레이션이 안정([0.5,2.0])되는지 — 확장의 핵심 목적.
+    from src.models import cell_panel
+    r = cell_panel.evaluate("external")              # 2005–2024
+    assert r.n_cells == 666 and r.years == (2005, 2024)
+    # 이전(136셀)은 시간CV calib 7.5로 불안정했음 → 확장 후 안정 범위 확인
+    assert 0.5 <= r.temporal["gbm"]["calib_slope"] <= 2.0
+    # 소스전환연도(2020) 제외 민감도도 안정 → 경계 불연속이 검증을 오염시키지 않음
+    assert r.temporal_ex_switch is not None
+    assert 0.5 <= r.temporal_ex_switch["gbm"]["calib_slope"] <= 2.0
+    # 공간 CV: GBM이 두 베이스라인 deviance를 이김(지역 신호 유지)
+    assert r.spatial["gbm"]["deviance"] < r.spatial["proportional"]["deviance"]
+    assert r.spatial["gbm"]["deviance"] < r.spatial["simple_mean"]["deviance"]
+    # 검증본 surface는 17개 시도 양수 발생률
+    surf = cell_panel.external_gbm_surface(2024)
+    assert surf["sido"].nunique() == 17 and (surf["rate_per_100k"] > 0).all()
 
 
 # --- M4: 코호트 리스크 통합·보정 ------------------------------------------

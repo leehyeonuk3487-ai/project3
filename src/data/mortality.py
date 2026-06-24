@@ -85,11 +85,14 @@ def available() -> bool:
     return config.DEATH_CAUSE_BY_CAUSE_CSV.exists()
 
 
-def load_mortality_by_cause() -> pd.DataFrame:
+def load_mortality_by_cause(years: list[int] | None = None) -> pd.DataFrame:
     """detail 파일 → long[cause, category, sido, age5, sex_name, year, deaths, rate_100k].
 
-    남자·20대·POOL_YEARS로 한정. 사인은 ICD 코드 기반 4범주로 분류.
+    남자·20대로 한정, 사인은 ICD 코드 기반 4범주로 분류.
+    years=None이면 M0 기본 구간(POOL_YEARS=2021–2024). 모듈 A 패널 등에서 다른 연도범위가
+    필요하면 years를 명시해 호출한다(★M0 발생률·예산용 POOL_YEARS는 불변).
     """
+    years = list(POOL_YEARS) if years is None else list(years)
     # KOSIS 사망원인표 계열은 cp949 고정(load_death_cause와 동일).
     raw = pd.read_csv(config.DEATH_CAUSE_BY_CAUSE_CSV, encoding="cp949", dtype=str)
     raw.columns = [str(c).strip() for c in raw.columns]
@@ -108,7 +111,7 @@ def load_mortality_by_cause() -> pd.DataFrame:
     })
     df["category"] = df["cause"].map(classify_cause)
     return df[(df["sex_name"] == "남자") & df["age5"].isin(AGE5_20S)
-              & df["year"].isin(POOL_YEARS)].reset_index(drop=True)
+              & df["year"].isin(years)].reset_index(drop=True)
 
 
 def mapping_table() -> pd.DataFrame:

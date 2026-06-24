@@ -25,7 +25,9 @@ import pandas as pd
 from ..data import aggregate, loaders, mortality
 
 SEED = 42
-PANEL_YEARS = [2020, 2021, 2022, 2023, 2024]
+PANEL_YEARS = [2020, 2021, 2022, 2023, 2024]              # allcause(추계 분모 한정)
+EXT_PANEL_YEARS = list(range(2005, 2025))                 # external(주민등록+추계 결합 분모)
+SOURCE_SWITCH_YEAR = 2020                                 # 주민등록(≤2019)→추계(≥2020) 경계
 AGE_BANDS = ["5-9세", "10-14세", "15-19세", "20-24세", "25-29세", "30-34세", "35-39세",
              "40-44세", "45-49세", "50-54세", "55-59세", "60-64세", "65-69세", "70-74세",
              "75-79세", "80-84세", "85-89세"]
@@ -51,19 +53,30 @@ def _region_chs() -> pd.DataFrame:
     return rp
 
 
-def build_panel(target: str = "allcause") -> pd.DataFrame:
-    """셀 패널[sido, sex, age5, year, deaths, py, + 피처]. 신규 데이터 없음."""
-    pop = loaders.load_population_projection()
-    pop = pop[(pop["sido"] != "전국") & pop["sex_name"].isin(["남자", "여자"])
-              & pop["age5"].isin(AGE_BANDS)].rename(columns={"value": "py", "sex_name": "sex"})
+def build_panel(target: str = "allcause", years: list[int] | None = None) -> pd.DataFrame:
+    """셀 패널[sido, sex, age5, year, deaths, py, + 피처]. 신규 데이터 없음.
 
+    target='allcause': 전체사인, 2020–2024(추계 분모), 시도×성×17연령밴드.
+    target='external': 외인(자살 제외), 2005–2024(주민등록 연앙+추계 결합 분모), 시도×남×20대.
+       세종 2005–2011은 분모 부재로 inner join에서 제외(2012 신설).
+    """
     if target == "allcause":
+        yrs = years or PANEL_YEARS
+        pop = loaders.load_population_projection()
+        pop = pop[(pop["sido"] != "전국") & pop["sex_name"].isin(["남자", "여자"])
+                  & pop["age5"].isin(AGE_BANDS)].rename(
+                      columns={"value": "py", "sex_name": "sex"})
         dc = loaders.load_death_cause()
-        dc = dc[dc["year"].isin(PANEL_YEARS) & dc["sex_name"].isin(["남자", "여자"])
+        dc = dc[dc["year"].isin(yrs) & dc["sex_name"].isin(["남자", "여자"])
                 & (dc["sido"] != "전국") & dc["age5"].isin(AGE_BANDS)]
         deaths = dc.rename(columns={"sex_name": "sex"})[["sido", "sex", "age5", "year", "deaths"]]
     elif target == "external":
-        det = mortality.load_mortality_by_cause()           # 남자 20대, 2021–24
+        yrs = years or EXT_PANEL_YEARS
+        # 결합 연앙/추계 분모(남자 20대) — load_population_midyear
+        pop = loaders.load_population_midyear()
+        pop = pop[(pop["sex_name"] == "남자") & pop["age5"].isin(["20-24세", "25-29세"])
+                  & pop["year"].isin(yrs)].rename(columns={"value": "py", "sex_name": "sex"})
+        det = mortality.load_mortality_by_cause(years=yrs)   # 남자 20대, 지정 연도범위
         ext = det[det["category"] == "external"].groupby(
             ["sido", "age5", "year"])["deaths"].sum().reset_index()
         ext["sex"] = "남자"
@@ -186,12 +199,31 @@ def spatial_cv(panel: pd.DataFrame) -> dict:
     return _run_cv(panel, folds)
 
 
-def temporal_cv(panel: pd.DataFrame, holdout_years: int = 2) -> dict:
-    """최근 N개 연도 홀드아웃(미래 일반화)."""
+def temporal_cv(panel: pd.DataFrame, holdout_years: int = 2,
+                exclude_years: tuple[int, ...] = ()) -> dict:
+    """최근 N개 연도 홀드아웃(미래 일반화). exclude_years는 패널에서 제거(소스전환 민감도)."""
+    if exclude_years:
+        panel = panel[~panel["year"].isin(exclude_years)]
     yrs = sorted(panel["year"].unique())
     cut = yrs[-holdout_years]
     folds = [(panel[panel["year"] < cut], panel[panel["year"] >= cut])]
     return _run_cv(panel, folds)
+
+
+def external_gbm_surface(predict_year: int = 2024) -> pd.DataFrame:
+    """채택된 GBM의 외인(상해)사망 surface (시도×age5, per-100k) for predict_year.
+
+    pricing 연결(검증본) 후보. rates 파이프라인 호환 컬럼. ★기본 백본(M0 직접 external)을
+    대체하지 않음 — config로 명시 전환할 때만 사용(대원칙: 백본 대체 금지).
+    """
+    panel = build_panel("external")
+    booster = _fit_gbm(panel)
+    pred = panel[panel["year"] == predict_year].copy()
+    pred["rate_per_100k"] = _pred_gbm(booster, pred) * 1e5
+    pred["rate_per_1000py"] = pred["rate_per_100k"] / 100.0
+    pred["sex"] = "남자"
+    pred["source"] = f"module_a_gbm_external_{predict_year}"
+    return pred[["sido", "sex", "age5", "rate_per_100k", "rate_per_1000py", "year", "source"]]
 
 
 def feature_importance(panel: pd.DataFrame) -> pd.DataFrame:
@@ -235,21 +267,32 @@ class ModuleAResult:
     target: str
     n_cells: int
     n_zero_pct: float
+    years: tuple[int, int]
     spatial: dict
     temporal: dict
     importance: pd.DataFrame
     adopt_gbm: bool
     note: str
+    temporal_ex_switch: dict = None   # external: 소스전환연도(2020) 제외 시간CV(민감도)
 
 
-def evaluate(target: str = "allcause") -> ModuleAResult:
-    """모듈 A 전체 평가(결정적). target='allcause'(1차) | 'external'(보조)."""
-    panel = build_panel(target)
+def evaluate(target: str = "allcause", years: list[int] | None = None) -> ModuleAResult:
+    """모듈 A 전체 평가(결정적). target='allcause'(1차) | 'external'(보조).
+
+    external은 시간CV를 '소스전환연도(2020) 포함/제외' 두 버전으로 계산해 경계 불연속이
+    검증을 오염시키는지 민감도 점검한다. 채택 게이트(공간·시간 모두 개선 + 캘리브레이션
+    [0.5,2.0])는 그대로 — 시간CV는 포함(전체) 기준으로 판정.
+    """
+    panel = build_panel(target, years=years)
     sp, tp = spatial_cv(panel), temporal_cv(panel)
     adopt, note = _adopt(sp, tp)
+    ex = None
+    if target == "external":
+        ex = temporal_cv(panel, exclude_years=(SOURCE_SWITCH_YEAR,))
+    yr = (int(panel["year"].min()), int(panel["year"].max()))
     return ModuleAResult(
         target=target, n_cells=len(panel),
-        n_zero_pct=round(float((panel["deaths"] == 0).mean() * 100), 2),
+        n_zero_pct=round(float((panel["deaths"] == 0).mean() * 100), 2), years=yr,
         spatial=sp, temporal=tp, importance=feature_importance(panel),
-        adopt_gbm=adopt, note=note,
+        adopt_gbm=adopt, note=note, temporal_ex_switch=ex,
     )

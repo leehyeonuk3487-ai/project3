@@ -84,14 +84,19 @@ def main() -> None:
     line("모듈 A — 셀 패널 발생률 GBM (M2 대체 보강, 공간·시간 CV)")
     from src.models import cell_panel
     print("M3가 불가했던 leave-one-시도-out 공간 CV를 M0 시도×성×연령×연도 joint 사망으로 수행.")
-    for tgt, lab in [("allcause", "전체사인(2,890셀·방법론 검증)"),
-                     ("external", "외인 상해사망(20대남 136셀·도메인 한계)")]:
-        a = cell_panel.evaluate(tgt)
-        print(f"\n[{lab}] 셀 {a.n_cells}, 0-카운트 {a.n_zero_pct}%")
+    runs = [("allcause", "전체사인(2,890셀·방법론 검증)", None),
+            ("external", "외인 상해사망 — 이전(136셀·2021–24)", [2021, 2022, 2023, 2024]),
+            ("external", "외인 상해사망 — 확장(666셀·2005–24)", None)]
+    for tgt, lab, yrs in runs:
+        a = cell_panel.evaluate(tgt, years=yrs)
+        print(f"\n[{lab}] 셀 {a.n_cells}, 0-카운트 {a.n_zero_pct}%, 연도 {a.years}")
         for cv, cvl in [("spatial", "공간CV"), ("temporal", "시간CV")]:
             d = getattr(a, cv)
             print(f"  {cvl}: GBM dev {d['gbm']['deviance']} (calib {d['gbm']['calib_slope']}) | "
                   f"비례보정 {d['proportional']['deviance']} | 단순평균 {d['simple_mean']['deviance']}")
+        if a.temporal_ex_switch:
+            e = a.temporal_ex_switch['gbm']
+            print(f"  시간CV(소스전환 2020 제외): GBM dev {e['deviance']} (calib {e['calib_slope']})")
         print(f"  채택: GBM={a.adopt_gbm} — {a.note}")
         print("  피처 중요도:",
               {r['feature']: r['gain%'] for _, r in a.importance.head(3).iterrows()})

@@ -131,16 +131,25 @@ def api_consistency():
             "rows": _records(con["table"].round(4))}
 
 
+def _module_a_dict(r):
+    d = {"n_cells": r.n_cells, "n_zero_pct": r.n_zero_pct,
+         "years": list(r.years), "spatial": r.spatial, "temporal": r.temporal,
+         "adopt_gbm": r.adopt_gbm, "note": r.note,
+         "importance": _records(r.importance, reset_index=False)}
+    if r.temporal_ex_switch is not None:
+        d["temporal_ex_switch"] = r.temporal_ex_switch   # 소스전환연도(2020) 제외 민감도
+    return d
+
+
 @lru_cache(maxsize=1)
 def _ai_performance():
     """AI 성능 2층: 모듈 A(집단 셀 발생률 학습·공간시간CV) + M2(개인 손상 ML, 음성결과)."""
-    mods = {}
-    for tgt in ("allcause", "external"):
-        r = cell_panel.evaluate(tgt)
-        mods[tgt] = {"n_cells": r.n_cells, "n_zero_pct": r.n_zero_pct,
-                     "spatial": r.spatial, "temporal": r.temporal,
-                     "adopt_gbm": r.adopt_gbm, "note": r.note,
-                     "importance": _records(r.importance, reset_index=False)}
+    mods = {
+        "allcause": _module_a_dict(cell_panel.evaluate("allcause")),
+        "external": _module_a_dict(cell_panel.evaluate("external")),           # 2005–2024 확장
+        "external_prior136": _module_a_dict(                                   # 이전 136셀(대조)
+            cell_panel.evaluate("external", years=[2021, 2022, 2023, 2024])),
+    }
     m2 = injury_ml.evaluate()
     return {
         "module_a": mods,

@@ -238,17 +238,23 @@ async function renderAI(){
   const ai = await getJSON("/api/ai_performance");
   document.getElementById("aiFraming").textContent = ai.framing;
   let html = "";
-  const labels = {allcause:"전체사인 (2,890셀 · 방법론 검증)",
-                  external:"외인 상해사망 (20대남 136셀 · 도메인 한계)"};
-  for (const tgt of ["allcause","external"]){
-    const m = ai.module_a[tgt];
-    html += `<h4>타깃: ${labels[tgt]} — GBM 채택: <b>${m.adopt_gbm?"예":"아니오(baseline 유지)"}</b></h4>`;
+  const labels = {
+    allcause:"전체사인 (2,890셀 · 방법론 검증)",
+    external_prior136:"외인 상해사망 — 이전 (20대남 136셀 · 2021–24)",
+    external:"외인 상해사망 — 확장 (666셀 · 2005–24, 주민등록+추계 분모)"};
+  for (const tgt of ["allcause","external_prior136","external"]){
+    const m = ai.module_a[tgt]; if(!m) continue;
+    html += `<h4>타깃: ${labels[tgt]} — GBM 채택: <b>${m.adopt_gbm?"예 ✅":"아니오(baseline 유지)"}</b></h4>`;
     html += `<table><tr><th>모델</th><th>공간CV deviance</th><th>공간 calib</th><th>시간CV deviance</th><th>시간 calib</th></tr>`;
     for (const [mk,ml] of [["gbm","GBM(Poisson)"],["proportional","비례보정(백본)"],["simple_mean","단순평균(성·연령·연도)"]]){
       html += `<tr><td>${ml}</td><td>${fmt(m.spatial[mk].deviance,3)}</td><td>${fmt(m.spatial[mk].calib_slope,2)}</td>`+
               `<td>${fmt(m.temporal[mk].deviance,3)}</td><td>${fmt(m.temporal[mk].calib_slope,2)}</td></tr>`;
     }
     html += `</table>`;
+    if (m.temporal_ex_switch){
+      const e = m.temporal_ex_switch.gbm;
+      html += `<div class="muted">시간CV 민감도(소스전환 2020 제외): GBM deviance ${fmt(e.deviance,3)}, calib ${fmt(e.calib_slope,2)} → 경계 불연속이 검증을 오염시키지 않음</div>`;
+    }
     const imp = m.importance.slice(0,4).map(r=>`${r.feature} ${fmt(r["gain%"],1)}%`).join(", ");
     html += `<div class="muted">피처 중요도(gain): ${imp}<br>${m.note}</div>`;
   }
