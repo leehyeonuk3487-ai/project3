@@ -213,8 +213,12 @@ def temporal_cv(panel: pd.DataFrame, holdout_years: int = 2,
 def external_gbm_surface(predict_year: int = 2024) -> pd.DataFrame:
     """채택된 GBM의 외인(상해)사망 surface (시도×age5, per-100k) for predict_year.
 
-    pricing 연결(검증본) 후보. rates 파이프라인 호환 컬럼. ★기본 백본(M0 직접 external)을
-    대체하지 않음 — config로 명시 전환할 때만 사용(대원칙: 백본 대체 금지).
+    rates 파이프라인 호환 컬럼. ★확정 결정(사용자 승인): pricing(death_injury)은 M0 직접
+    관측 external 백본을 유지하고 본 surface로 대체하지 않는다 — GBM 승리 동인이 year 추세
+    외삽(gain 68%)이라 현재 pricing 정확도 우위가 아니고(M0와 상관 0.89), 교체 시 MECE
+    envelope가 깨지며 지역 편차(±13~28%)가 예산·보험료에 전파되기 때문.
+    용도: ① 대시보드 AI성능 패널 검증 근거(첫 도메인 타깃 채택), ② M6 시나리오/미래 투영의
+    추세 외삽(거기선 외삽이 목적에 부합). 백본 대체 금지(대원칙 우선).
     """
     panel = build_panel("external")
     booster = _fit_gbm(panel)
