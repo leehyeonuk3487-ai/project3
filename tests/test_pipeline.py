@@ -351,6 +351,154 @@ def test_mma_api_client_graceful():
     assert "ok" in r and r["source"] in ("live", "cache", "error")
 
 
+# --- 혜택 최대화 LP (M6 선행 최적화 레이어) ------------------------------
+
+def test_benefit_lp_optimizes_respects_budget_and_floor():
+    full = budget.expected_claims("경기도").total_claims * budget.DEFAULT_LOADING
+    lp = budget.optimize_benefit_lp("경기도", full * 0.8)
+    assert lp["feasible"]
+    # 예산 준수(±1원 반올림)
+    assert lp["estimate"].total_claims * budget.DEFAULT_LOADING <= full * 0.8 + 1
+    # 고위험(생명·장해) floor=1.0 → 배제 금지
+    for it in budget.CATASTROPHIC_ITEMS:
+        assert lp["coverage_scale"][it] >= 1.0 - 1e-6
+    # 재현성(시드/입력 동일)
+    assert budget.optimize_benefit_lp("경기도", full * 0.8)["coverage_scale"] \
+        == lp["coverage_scale"]
+
+
+def test_benefit_lp_floor_prevents_exclusion():
+    # floor=0이면 순수 수혜자최대화가 사망보장을 배제 → floor의 필요성 입증(정직)
+    full = budget.expected_claims("경기도").total_claims * budget.DEFAULT_LOADING
+    free = budget.optimize_benefit_lp("경기도", full * 0.6, catastrophic_floor=0.0)
+    assert free["coverage_scale"]["death_injury"] < 0.5      # 고액·저빈도 → 밀려남
+    # 같은 예산에서 floor=1.0이면 고위험 완전보장 비용이 초과 → infeasible 정직 보고
+    floored = budget.optimize_benefit_lp("경기도", full * 0.6, catastrophic_floor=1.0)
+    assert floored["feasible"] is False
+
+
+def test_lp_at_least_greedy_and_monotone_budget():
+    from src.optimize import scenarios
+    tab = scenarios.optimization_under_scenarios("경기도")
+    feas = tab[tab["LP_feasible"]]
+    # LP 수혜자 ≥ 그리디 (정의상 최적; 동률 허용)
+    assert (feas["LP_수혜자"] >= feas["그리디_수혜자"] - 1e-6).all()
+    assert (feas["LP_추가수혜"] >= -1e-6).all()
+    # 예산↑ → 수혜자 단조 비감소
+    benef = feas.sort_values("예산액")["LP_수혜자"].tolist()
+    assert benef == sorted(benef)
+
+
+# --- M6: 미래 투영 추세 외삽 + 시나리오·민감도 ----------------------------
+
+def test_projection_trend_band_data_grounded():
+    from src.models import projection
+    slopes = projection.external_trend_slopes()
+    # 장기 감소 > 최근 둔화 > 평탄(보수) — 데이터 기반, 점추정 아님
+    assert slopes["optimistic"] < slopes["base"] < 0      # 둘 다 감소
+    assert slopes["conservative"] == 0.0                  # 보수=평탄
+    band = projection.external_trend_band(2024, [2024, 2027, 2030])
+    # base_year=1.0, 미래로 갈수록 낙관 ≤ 기준 ≤ 보수 (배수)
+    row = band[band["year"] == 2030].iloc[0]
+    assert row["optimistic_mult"] <= row["base_mult"] <= row["conservative_mult"]
+    assert abs(band[band["year"] == 2024].iloc[0]["base_mult"] - 1.0) < 1e-9
+    assert "외삽" in band.attrs["note"]                   # 한계 노트 존재
+
+
+def test_population_cliff_declines():
+    from src.models import projection
+    cliff = projection.population_cliff("전국", 2024, [2024, 2027, 2030])
+    # 인구절벽: 현역 모집단 단조 감소, 2030 ≈ 270만(작업지시 수치)
+    stocks = cliff.set_index("year")["stock"]
+    assert stocks[2030] < stocks[2027] < stocks[2024]
+    assert 2.6e6 < stocks[2030] < 2.8e6
+
+
+def test_tornado_ranks_drivers_and_pricing_invariant():
+    from src.optimize import scenarios
+    base_pc = scenarios.sensitivity_table("경기도").attrs["base_premium_pc"]
+    # 기준 = 현재 M0 백본 보험료(외삽 미주입) — 계리 보험료와 일치
+    from src.optimize import premium
+    assert abs(base_pc - round(premium.actuarial_premium("경기도").gross_pc)) <= 1
+    tor = scenarios.tornado("경기도")
+    # 토네이도 swing 내림차순 정렬
+    assert tor["swing"].tolist() == sorted(tor["swing"].tolist(), reverse=True)
+    # 보장한도가 1인당 보험료 최대 변동요인(선형 ±20%)
+    assert tor.iloc[0]["변수"] == "보장 한도(급부)"
+    # 인구절벽은 1인당 가격엔 거의 영향 없음(총 규모 변수임을 정직히 드러냄)
+    pop_row = tor[tor["변수"].str.contains("인구절벽")].iloc[0]
+    assert pop_row["swing%기준"] < 2.0
+
+
+def test_multiyear_band_monotone_and_population_driven():
+    from src.optimize import scenarios
+    band = scenarios.multiyear_band("경기도", years=[2024, 2027, 2030])
+    # 각 연도 낙관 ≤ 기준 ≤ 보수 (외인추세 밴드)
+    for _, r in band.iterrows():
+        assert r["optimistic_총예산"] <= r["base_총예산"] <= r["conservative_총예산"]
+    # 인구절벽으로 총예산(기준)이 2024 대비 감소
+    assert band[band["year"] == 2030].iloc[0]["base_총예산"] < \
+        band[band["year"] == 2024].iloc[0]["base_총예산"]
+
+
+# --- M7: 통합 리포트 (조립기 — 필수 섹션·미션·라이선스 렌더 검증) ----------
+
+def _synthetic_collected():
+    """build_report 입력 스키마에 맞는 합성 데이터(개별 수치는 모듈 테스트가 검증)."""
+    import pandas as pd
+    return {
+        "schedule": "경기도",
+        "m0_envelope": {"rel_error_pct": 0.015},
+        "moduleA": {"adopt_gbm": True, "years": (2005, 2024), "n_cells": 100,
+                    "spatial_calib": 1.28, "temporal_calib": 0.76, "note": "ok"},
+        "m2": {"n_obs": 1000, "prevalence": 0.1, "kfold_best_auc": 0.565,
+               "holdout_baseline_auc": 0.528, "adopt": "baseline", "adopt_auc": 0.528},
+        "loro": {"model_mae": 4.0, "baseline_mae": 5.82,
+                 "mae_improvement_pct": 31.3, "pi_coverage": 0.94},
+        "m5": {"gross_pc": 30668, "cv": 0.114, "loading_implied": 1.392},
+        "trend": {"optimistic": -6.86, "base": -3.32, "conservative": 0.0},
+        "lp": {"budget": 2162161709, "lp_beneficiaries": 1203.6,
+               "greedy_beneficiaries": 1203.6, "lp_gain": 0.0},
+        "tornado": pd.DataFrame([
+            {"변수": "보장 한도(급부)", "낙관(예산↓)": 24534, "기준": 30668,
+             "보수(예산↑)": 36802, "swing": 12268, "swing%기준": 40.0, "근거": "x"}]),
+        "multiyear": pd.DataFrame([
+            {"year": 2024, "population": 98132, "optimistic_총예산": 2.7e9,
+             "base_총예산": 2.7e9, "conservative_총예산": 2.7e9}]),
+        "cliff": {"y2024": 3364971, "y2030": 2703130, "pct": -19.7},
+    }
+
+
+def test_m7_report_renders_all_required_sections():
+    from src.validation import integrated_report
+    md = integrated_report.build_report(collected=_synthetic_collected())
+    # 평가기준 4개 매핑 섹션
+    for sec in ["공공데이터 활용", "AI 성능 검증", "독창성", "발전가능성"]:
+        assert sec in md
+    # 정직성·한계 / 윤리·미션 / 데이터 출처·라이선스
+    assert "정직성·한계" in md and "윤리" in md
+    assert "미션" in md and "더 많은 장병이 더 많은 혜택" in md
+    assert "개인" in md and "스코어링 금지" in md          # 개인 차등 아님
+    assert "라이선스" in md and "공공누리" in md
+    # ★pricing 불변 + 외삽 미래한정 원칙이 리포트에 박혀 있어야 함
+    assert "M0 직접관측 백본" in md
+    assert "구조변화" in md and "미반영" in md             # 외삽 한계 노트
+    # 2층 AI 검증 + 베이스라인 정직 비교
+    assert "baseline 채택" in md and "0.565" in md
+
+
+def test_m7_collect_keys_and_pricing_invariant():
+    """라이브 collect()가 필수 키를 내고, M5 보험료가 M0 백본과 일치(외삽 미주입)."""
+    from src.validation import integrated_report
+    from src.optimize import premium
+    c = integrated_report.collect("경기도")
+    for k in ["m0_envelope", "moduleA", "m2", "loro", "m5", "trend",
+              "lp", "tornado", "multiyear", "cliff"]:
+        assert k in c
+    # pricing = M0 백본(계리 보험료)와 일치 — 외삽 주입 없음
+    assert abs(c["m5"]["gross_pc"] - round(premium.actuarial_premium("경기도").gross_pc)) <= 1
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

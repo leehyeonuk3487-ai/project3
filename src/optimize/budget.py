@@ -31,6 +31,9 @@ DEFAULT_LOADING = 1.25
 # 예산 제약 시 보장 우선순위(사망 > 후유장해 > 질병사망 > 질병후유장해 > 골절 > 입원)
 DEFAULT_PRIORITY = ["death_injury", "disability", "death_disease",
                     "disease_disability", "fracture", "hospitalization"]
+# 고위험(생명·중대장해) 보장 — '고위험 배제 금지' 원칙상 LP에서 최소보장 floor 적용
+CATASTROPHIC_ITEMS = ["death_injury", "disability", "death_disease",
+                      "disease_disability"]
 
 
 def resolve_population(schedule_name: str, year: int = 2024,
@@ -154,6 +157,131 @@ def optimize_under_budget(
         "budget": annual_budget,
         "feasible_full": full.total_claims * loading <= annual_budget,
         "full_premium_total": full.total_claims * loading,
+    }
+
+
+def optimize_benefit_lp(
+    schedule_name: str,
+    annual_budget: float,
+    population_override: int | None = None,
+    year: int = 2024,
+    loading: float = DEFAULT_LOADING,
+    weights: dict[str, float] | None = None,
+    catastrophic_floor: float = 1.0,
+    floor_items: list[str] | None = None,
+) -> dict:
+    """예산 제약하 **기대 수혜 장병 수 최대화** (fractional-knapsack LP).
+
+    그리디(optimize_under_budget)를 대체하지 않고 '추가'하는 진짜 최적화 레이어.
+    미션("같은 예산으로 더 많은 장병이 더 많은 혜택")을 직접 목적함수로 옮긴다.
+
+    의사결정변수  s_i ∈ [floor_i, 1]   (항목 i의 보장률)
+    목적(최대화)  Σ  w_i · s_i · expected_events_i        (= 가중 수혜자 수)
+    제약          Σ  s_i · expected_claims_i  ≤  예산/로딩  (예산)
+                  s_i ≥ floor               (고위험 항목 — 배제 금지)
+
+    ★비용 최소화가 아니라 '예산 안에서 혜택(수혜 장병) 최대화'다.
+    ★expected_events/expected_claims = 1/payout 이므로 무제약 LP는 저액·고빈도
+      항목(골절·입원)을 선호 → 사망·중대장해가 0으로 밀린다. 이를 막기 위해
+      고위험 항목에 catastrophic_floor를 둔다(기본 1.0 = 생명·장해 완전보장 보장).
+    scipy.linprog(method='highs')로 해를 구한다. 시드/입력 동일 시 재현성 보장.
+    """
+    from scipy.optimize import linprog
+
+    weights = weights or {}
+    floor_items = floor_items if floor_items is not None else CATASTROPHIC_ITEMS
+    full = expected_claims(schedule_name, population_override, year, loading=loading)
+    bi = full.by_item.reset_index(drop=True)
+    items = list(bi["coverage_item"])
+    events = bi["expected_events"].to_numpy(float)
+    claims = bi["expected_claims"].to_numpy(float)
+    w = np.array([weights.get(it, 1.0) for it in items], float)
+
+    budget_claims = annual_budget / loading
+    lo = np.array([catastrophic_floor if it in floor_items else 0.0
+                   for it in items], float)
+    bounds = list(zip(lo, np.ones(len(items))))
+
+    # 고위험 floor만으로 예산 초과 → 비현실적 floor. 해 없음을 정직히 보고.
+    floor_cost = float(np.dot(lo, claims))
+    if floor_cost > budget_claims + 1e-6:
+        return {
+            "method": "benefit_lp",
+            "feasible": False,
+            "reason": "catastrophic_floor가 예산을 초과 — floor 완화 필요",
+            "floor_premium": floor_cost * loading,
+            "budget": annual_budget,
+            "coverage_scale": {it: float(lo[i]) for i, it in enumerate(items)},
+        }
+
+    # linprog는 최소화 → 목적 부호 반전(수혜자 최대화)
+    res = linprog(c=-(w * events), A_ub=claims.reshape(1, -1),
+                  b_ub=[budget_claims], bounds=bounds, method="highs")
+    if not res.success:
+        return {"method": "benefit_lp", "feasible": False,
+                "reason": res.message, "budget": annual_budget}
+
+    # 6자리로 '내림'(반올림 금지) — binding 항목이 위로 반올림되어 예산을
+    # 미세 초과하는 것을 막는다(예산 제약은 절대 위반하지 않게 보수적 절사).
+    scale = {it: float(np.floor(min(res.x[i], 1.0) * 1e6) / 1e6)
+             for i, it in enumerate(items)}
+    est = expected_claims(schedule_name, population_override, year,
+                          coverage_scale=scale, loading=loading)
+    beneficiaries = float(np.dot(res.x, events))
+    return {
+        "method": "benefit_lp",
+        "feasible": True,
+        "coverage_scale": scale,
+        "estimate": est,
+        "budget": annual_budget,
+        "expected_beneficiaries": round(beneficiaries, 1),
+        "weighted_benefit": round(float(np.dot(w * res.x, events)), 1),
+        "full_premium_total": full.total_claims * loading,
+        "feasible_full": full.total_claims * loading <= annual_budget,
+        "catastrophic_floor": catastrophic_floor,
+    }
+
+
+def compare_allocation(
+    schedule_name: str,
+    annual_budget: float,
+    population_override: int | None = None,
+    year: int = 2024,
+    loading: float = DEFAULT_LOADING,
+    catastrophic_floor: float = 1.0,
+) -> dict:
+    """그리디(고정 우선순위) vs 혜택최대화 LP — 정직 비교.
+
+    같은 예산에서 '수혜 장병 수'를 두 방식이 각각 얼마나 만드는지 보고한다.
+    LP는 정의상 그리디 이상(>=)의 수혜자를 낸다(동률 가능). 베이스라인 정직 비교.
+    """
+    def _benef(est: ClaimEstimate) -> float:
+        bi = est.by_item
+        # est의 expected_events는 보장률 무관(발생 자체) → 보장률 가중 재계산
+        return float(sum(r["expected_events"] for _, r in bi.iterrows()))
+
+    g = optimize_under_budget(schedule_name, annual_budget, population_override,
+                              year, loading=loading)
+    lp = optimize_benefit_lp(schedule_name, annual_budget, population_override,
+                             year, loading=loading,
+                             catastrophic_floor=catastrophic_floor)
+    full = expected_claims(schedule_name, population_override, year, loading=loading)
+    ev = dict(zip(full.by_item["coverage_item"], full.by_item["expected_events"]))
+
+    def _covered(scale: dict) -> float:
+        return float(sum(ev.get(it, 0.0) * s for it, s in scale.items()))
+
+    g_benef = _covered(g["coverage_scale"])
+    lp_benef = _covered(lp["coverage_scale"]) if lp.get("feasible") else float("nan")
+    return {
+        "budget": annual_budget,
+        "greedy": {"coverage_scale": g["coverage_scale"],
+                   "beneficiaries": round(g_benef, 1)},
+        "lp": {"coverage_scale": lp.get("coverage_scale"),
+               "beneficiaries": round(lp_benef, 1),
+               "feasible": lp.get("feasible")},
+        "lp_gain_beneficiaries": round(lp_benef - g_benef, 1)
+        if lp.get("feasible") else None,
     }
 
 
