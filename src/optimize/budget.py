@@ -35,6 +35,18 @@ DEFAULT_PRIORITY = ["death_injury", "disability", "death_disease",
 CATASTROPHIC_ITEMS = ["death_injury", "disability", "death_disease",
                       "disease_disability"]
 
+# 복지가중(중대도) 목적함수 가중치 — ★결과(LP 우위)에서 역산하지 않고 '독립 근거'로
+# 사전 고정한다(조작 의심 차단). 근거 = 사건이 장병에게 끼치는 '건강·생애 손실 크기'
+# (GBD 장애가중 류): 사망=생애상실 1.0, 영구 후유장해≈0.4, 경상(골절·입원)=경미·일시
+# 0.08. ★골절과 입원은 동일 '경상 tier'로 둔다 — 둘의 상대 중대도는 데이터로 견고히
+# 가릴 수 없어(지급액도 30.0만≈31.6만 거의 동일) 임의 구분으로 LP 우위를 만들지 않는다.
+# 질병계열은 상해계열과 동일 tier(사망=사망, 후유장해=후유장해).
+DEFAULT_WELFARE_WEIGHTS = {
+    "death_injury": 1.0, "death_disease": 1.0,
+    "disability": 0.4, "disease_disability": 0.4,
+    "fracture": 0.08, "hospitalization": 0.08,
+}
+
 
 def resolve_population(schedule_name: str, year: int = 2024,
                        population_override: int | None = None) -> tuple[int, str]:
@@ -170,32 +182,36 @@ def optimize_benefit_lp(
     catastrophic_floor: float = 1.0,
     floor_items: list[str] | None = None,
 ) -> dict:
-    """예산 제약하 **기대 수혜 장병 수 최대화** (fractional-knapsack LP).
+    """예산 제약하 **복지가중 혜택 최대화** (fractional-knapsack LP).
 
     그리디(optimize_under_budget)를 대체하지 않고 '추가'하는 진짜 최적화 레이어.
     미션("같은 예산으로 더 많은 장병이 더 많은 혜택")을 직접 목적함수로 옮긴다.
 
     의사결정변수  s_i ∈ [floor_i, 1]   (항목 i의 보장률)
-    목적(최대화)  Σ  w_i · s_i · expected_events_i        (= 가중 수혜자 수)
+    목적(최대화)  Σ  w_i · s_i · expected_events_i     (복지가중 혜택)
     제약          Σ  s_i · expected_claims_i  ≤  예산/로딩  (예산)
                   s_i ≥ floor               (고위험 항목 — 배제 금지)
 
-    ★비용 최소화가 아니라 '예산 안에서 혜택(수혜 장병) 최대화'다.
-    ★expected_events/expected_claims = 1/payout 이므로 무제약 LP는 저액·고빈도
-      항목(골절·입원)을 선호 → 사망·중대장해가 0으로 밀린다. 이를 막기 위해
-      고위험 항목에 catastrophic_floor를 둔다(기본 1.0 = 생명·장해 완전보장 보장).
+    ★목적함수는 '머릿수'가 아니라 '복지가중 혜택'이다(weights=None → 중대도가중).
+      머릿수 최대화(w_i=1)는 밀도=events/claims=1/payout 라 **싼 보장을 잔뜩 주는
+      쪽으로 퇴화**(미션 '더 많은 혜택'과 불일치). 그래서 기본 목적을 사건 중대도
+      (사망>후유장해>경상)로 가중한다(DEFAULT_WELFARE_WEIGHTS — 결과 아닌 독립 근거).
+      머릿수 목적이 필요하면 weights={항목:1.0 …} 를 명시한다.
+    ★고위험 floor는 목적함수와 무관하게 필수다. 사망은 희소·고액(payout 5천만)이라
+      복지가중을 줘도 밀도(w/payout)가 골절의 1/100 수준 → 어떤 밀도최적화(LP·그리디)
+      든 floor 없으면 사망을 버린다. floor는 꼼수가 아니라 '고위험 배제 금지'의 인코딩.
     scipy.linprog(method='highs')로 해를 구한다. 시드/입력 동일 시 재현성 보장.
     """
     from scipy.optimize import linprog
 
-    weights = weights or {}
+    wmap = DEFAULT_WELFARE_WEIGHTS if weights is None else weights
     floor_items = floor_items if floor_items is not None else CATASTROPHIC_ITEMS
     full = expected_claims(schedule_name, population_override, year, loading=loading)
     bi = full.by_item.reset_index(drop=True)
     items = list(bi["coverage_item"])
     events = bi["expected_events"].to_numpy(float)
     claims = bi["expected_claims"].to_numpy(float)
-    w = np.array([weights.get(it, 1.0) for it in items], float)
+    w = np.array([wmap.get(it, 1.0) for it in items], float)
 
     budget_claims = annual_budget / loading
     lo = np.array([catastrophic_floor if it in floor_items else 0.0
@@ -234,8 +250,9 @@ def optimize_benefit_lp(
         "coverage_scale": scale,
         "estimate": est,
         "budget": annual_budget,
-        "expected_beneficiaries": round(beneficiaries, 1),
-        "weighted_benefit": round(float(np.dot(w * res.x, events)), 1),
+        "objective": "welfare_weighted" if weights is None else "custom_weights",
+        "expected_beneficiaries": round(beneficiaries, 1),   # 머릿수(해석용)
+        "weighted_benefit": round(float(np.dot(w * res.x, events)), 1),  # ★최대화 대상
         "full_premium_total": full.total_claims * loading,
         "feasible_full": full.total_claims * loading <= annual_budget,
         "catastrophic_floor": catastrophic_floor,
@@ -250,16 +267,13 @@ def compare_allocation(
     loading: float = DEFAULT_LOADING,
     catastrophic_floor: float = 1.0,
 ) -> dict:
-    """그리디(고정 우선순위) vs 혜택최대화 LP — 정직 비교.
+    """그리디(고정 우선순위) vs 복지가중 LP — 정직 비교.
 
-    같은 예산에서 '수혜 장병 수'를 두 방식이 각각 얼마나 만드는지 보고한다.
-    LP는 정의상 그리디 이상(>=)의 수혜자를 낸다(동률 가능). 베이스라인 정직 비교.
+    ★비교는 LP가 실제로 최대화하는 '복지가중 혜택'(weighted_benefit) 기준이다.
+      LP는 정의상 그 목적에서 그리디 이상(>=)을 보장한다(동률 가능). 머릿수도 함께
+      보고하되, LP가 머릿수를 줄이고 더 중대한 보장을 택할 수 있으므로(미션 '깊이')
+      머릿수 기준 LP>=gre디는 일반적으로 성립하지 않는다 — 가중혜택으로 비교한다.
     """
-    def _benef(est: ClaimEstimate) -> float:
-        bi = est.by_item
-        # est의 expected_events는 보장률 무관(발생 자체) → 보장률 가중 재계산
-        return float(sum(r["expected_events"] for _, r in bi.iterrows()))
-
     g = optimize_under_budget(schedule_name, annual_budget, population_override,
                               year, loading=loading)
     lp = optimize_benefit_lp(schedule_name, annual_budget, population_override,
@@ -267,23 +281,33 @@ def compare_allocation(
                              catastrophic_floor=catastrophic_floor)
     full = expected_claims(schedule_name, population_override, year, loading=loading)
     ev = dict(zip(full.by_item["coverage_item"], full.by_item["expected_events"]))
+    wt = DEFAULT_WELFARE_WEIGHTS
 
-    def _covered(scale: dict) -> float:
+    def _headcount(scale: dict) -> float:
         return float(sum(ev.get(it, 0.0) * s for it, s in scale.items()))
 
-    g_benef = _covered(g["coverage_scale"])
-    lp_benef = _covered(lp["coverage_scale"]) if lp.get("feasible") else float("nan")
+    def _welfare(scale: dict) -> float:
+        return float(sum(wt.get(it, 1.0) * ev.get(it, 0.0) * s
+                         for it, s in scale.items()))
+
+    feasible = lp.get("feasible")
+    g_head, g_welf = _headcount(g["coverage_scale"]), _welfare(g["coverage_scale"])
+    lp_head = _headcount(lp["coverage_scale"]) if feasible else float("nan")
+    lp_welf = _welfare(lp["coverage_scale"]) if feasible else float("nan")
     return {
         "budget": annual_budget,
+        "objective": "welfare_weighted",
         "greedy": {"coverage_scale": g["coverage_scale"],
-                   "beneficiaries": round(g_benef, 1)},
+                   "beneficiaries": round(g_head, 1),
+                   "welfare_benefit": round(g_welf, 1)},
         "lp": {"coverage_scale": lp.get("coverage_scale"),
-               "beneficiaries": round(lp_benef, 1),
-               "feasible": lp.get("feasible")},
-        # +0.0 로 부호있는 0(-0.0)을 0.0으로 정규화. floor 절사(≤1e-6 보장률)로
-        # LP가 그리디와 동률일 때 -0.0 이 뜨는 표시 결함 제거(실질 수혜자 동일).
-        "lp_gain_beneficiaries": round(lp_benef - g_benef, 1) + 0.0
-        if lp.get("feasible") else None,
+               "beneficiaries": round(lp_head, 1),
+               "welfare_benefit": round(lp_welf, 1),
+               "feasible": feasible},
+        # ★보장 기준: LP의 복지가중 혜택 ≥ 그리디 (+0.0로 부호있는 0 정규화).
+        "lp_gain_welfare": (round(lp_welf - g_welf, 1) + 0.0) if feasible else None,
+        "lp_gain_beneficiaries": (round(lp_head - g_head, 1) + 0.0)
+        if feasible else None,
     }
 
 

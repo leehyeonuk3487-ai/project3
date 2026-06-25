@@ -178,3 +178,100 @@ def optimization_under_scenarios(schedule: str = DEFAULT_SCHEDULE,
     df.attrs["note"] = ("예산 50%대 미만은 고위험 완전보장(floor) 비용 초과로 "
                         "LP infeasible(정직 보고). LP는 정의상 그리디 이상의 수혜자.")
     return df
+
+
+# --- 안전장치: 가중치 민감도 (역산 의심 차단) -------------------------------
+# ★독립 근거로 사전 고정한 '여러' 가중 셋. 결과에서 역산하지 않았음을 투명 공개.
+#   W1 GBD·W2 순서형은 골절≥입원(중대도), W3는 임상 acuity(입원 admission이 더 중증)
+#   관점. 어느 가정이 옳은지는 데이터로 단정 불가 → '특정 가중에서만 LP가 이긴다'를
+#   숨기지 않고 전부 보여준다(조작 아님의 증거).
+WEIGHT_SCHEMES = {
+    "W0 머릿수(균등)": {},   # 빈 dict → 모두 1.0 (머릿수)
+    "W1 GBD장애가중(골절>입원)": {"death_injury": 1.0, "death_disease": 1.0,
+                              "disability": 0.6, "disease_disability": 0.6,
+                              "fracture": 0.07, "hospitalization": 0.05},
+    "W2 순서형중대도(골절>입원)": {"death_injury": 5, "death_disease": 5,
+                             "disability": 4, "disease_disability": 4,
+                             "fracture": 2, "hospitalization": 1},
+    "W3 임상acuity(입원>골절)": {"death_injury": 5, "death_disease": 5,
+                            "disability": 4, "disease_disability": 4,
+                            "hospitalization": 2, "fracture": 1},
+}
+
+
+def _benefit(scale: dict, ev: dict, w: dict) -> float:
+    return float(sum(w.get(it, 1.0) * ev.get(it, 0.0) * s for it, s in scale.items()))
+
+
+def weight_sensitivity(schedule: str = DEFAULT_SCHEDULE,
+                       budget_frac: float = 0.8) -> pd.DataFrame:
+    """가중치 민감도: 여러 독립 가중 셋에서 그리디 vs LP(해당 가중) 가중혜택 비교.
+
+    ★조작 의심 차단 장치. LP 우위가 '특정 가중치에서만' 나오는지 전부 공개한다.
+      실제: W0/W1/W2(골절≥입원)에서는 동률(그리디가 마침 밀도최적), W3(입원>골절)
+      에서만 LP 우위 → '복지가중이 무조건 LP를 이기게 한다'는 주장은 하지 않는다.
+      (현 표는 floor 위 재량항목이 골절·입원 2개뿐·지급액 거의 동일한 knife-edge.)
+    """
+    B = budget.expected_claims(schedule).total_claims * budget.DEFAULT_LOADING * budget_frac
+    full = budget.expected_claims(schedule)
+    ev = dict(zip(full.by_item["coverage_item"], full.by_item["expected_events"]))
+    g = budget.optimize_under_budget(schedule, B)        # 우선순위 그리디(가중 무관)
+    rows = []
+    for name, wd in WEIGHT_SCHEMES.items():
+        w = wd or {}
+        lp = budget.optimize_benefit_lp(schedule, B, weights=(w or {k: 1.0 for k in ev}))
+        if not lp.get("feasible"):
+            rows.append({"가중셋": name, "그리디_가중혜택": None,
+                         "LP_가중혜택": None, "LP우위": None, "비고": "infeasible"})
+            continue
+        gb = _benefit(g["coverage_scale"], ev, w)
+        lb = _benefit(lp["coverage_scale"], ev, w)
+        rows.append({"가중셋": name, "그리디_가중혜택": round(gb, 1),
+                     "LP_가중혜택": round(lb, 1), "LP우위": round(lb - gb, 1) + 0.0,
+                     "비고": "LP우위" if lb - gb > 1 else "동률(역산 안 함)"})
+    df = pd.DataFrame(rows)
+    df.attrs["note"] = ("독립 근거 가중 셋들. LP 우위가 W3에서만 → 가중치를 LP가 이기게 "
+                        "고른 게 아님을 투명 공개(현 표 knife-edge). 견고한 LP 필요성 "
+                        "근거는 perturbation_sensitivity 참고.")
+    return df
+
+
+# --- Option 5: 섭동 민감도 (LP 필요성의 견고한 증거) ------------------------
+
+def perturbation_sensitivity(schedule: str = DEFAULT_SCHEDULE,
+                             budget_fracs=(0.7, 0.8, 0.9)) -> pd.DataFrame:
+    """그리디 '우선순위 가정' 섭동에 LP가 견고함 — 표·예산·가중 불변, 가정만 흔듦.
+
+    그리디는 손으로 정한 우선순위에 의존한다. 현 표에선 그 순서가 우연히 밀도최적이라
+    LP와 동률이지만, **순서 가정 하나만 바꾸면(입원先)** 그리디는 즉시 suboptimal,
+    LP는 목적함수만 보므로 불변 → 같은 예산에서 더 많은 (균등가중) 수혜자.
+    → "지금은 우연히 같지만, 가정이 흔들리면 LP만 최적을 보장한다"의 수치 증거.
+    """
+    full = budget.expected_claims(schedule).total_claims * budget.DEFAULT_LOADING
+    fullest = budget.expected_claims(schedule)
+    ev = dict(zip(fullest.by_item["coverage_item"], fullest.by_item["expected_events"]))
+    w1 = {k: 1.0 for k in ev}                 # 균등가중(머릿수) — 섭동 증거는 가중 무관
+    # 섭동 우선순위: 고위험 먼저(동일) + 입원을 골절 앞으로(밀도 역행 가정)
+    alt_priority = [i for i in budget.DEFAULT_PRIORITY if i in budget.CATASTROPHIC_ITEMS] \
+        + ["hospitalization", "fracture"]
+    rows = []
+    for frac in budget_fracs:
+        B = full * frac
+        g0 = budget.optimize_under_budget(schedule, B)                 # 기본(우연 밀도최적)
+        g1 = budget.optimize_under_budget(schedule, B, priority=alt_priority)  # 섭동
+        lp = budget.optimize_benefit_lp(schedule, B, weights=w1)       # 균등 LP
+        h0 = _benefit(g0["coverage_scale"], ev, {})
+        h1 = _benefit(g1["coverage_scale"], ev, {})
+        hl = _benefit(lp["coverage_scale"], ev, {}) if lp.get("feasible") else float("nan")
+        rows.append({
+            "예산(full대비)": f"{frac:.0%}",
+            "그리디_기본_수혜자": round(h0, 1),
+            "그리디_섭동_수혜자": round(h1, 1),
+            "LP_수혜자(불변)": round(hl, 1),
+            "LP_추가수혜_vs섭동": round(hl - h1, 1) + 0.0,
+        })
+    df = pd.DataFrame(rows)
+    df.attrs["note"] = ("표·예산·가중 불변, 그리디 '우선순위 가정'만 입원先으로 섭동. "
+                        "LP는 가정 불변이라 최적 유지 → 섭동된 그리디 대비 추가 수혜. "
+                        "그리디 최적성이 '운 좋은 가정'에 의존함을 정량 입증.")
+    return df

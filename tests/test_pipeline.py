@@ -457,8 +457,17 @@ def _synthetic_collected():
                  "mae_improvement_pct": 31.3, "pi_coverage": 0.94},
         "m5": {"gross_pc": 30668, "cv": 0.114, "loading_implied": 1.392},
         "trend": {"optimistic": -6.86, "base": -3.32, "conservative": 0.0},
-        "lp": {"budget": 2162161709, "lp_beneficiaries": 1203.6,
-               "greedy_beneficiaries": 1203.6, "lp_gain": 0.0},
+        "lp": {"budget": 2162161709, "objective": "welfare_weighted",
+               "lp_welfare": 118.5, "greedy_welfare": 118.5, "lp_gain_welfare": 0.0,
+               "lp_beneficiaries": 1203.6, "greedy_beneficiaries": 1203.6},
+        "weight_sens": pd.DataFrame([
+            {"가중셋": "W0 머릿수(균등)", "그리디_가중혜택": 1203.6, "LP_가중혜택": 1203.6,
+             "LP우위": 0.0, "비고": "동률(역산 안 함)"},
+            {"가중셋": "W3 임상acuity(입원>골절)", "그리디_가중혜택": 1579.0,
+             "LP_가중혜택": 2400.8, "LP우위": 821.8, "비고": "LP우위"}]),
+        "perturbation": pd.DataFrame([
+            {"예산(full대비)": "80%", "그리디_기본_수혜자": 1203.6, "그리디_섭동_수혜자": 1157.3,
+             "LP_수혜자(불변)": 1203.6, "LP_추가수혜_vs섭동": 46.3}]),
         "tornado": pd.DataFrame([
             {"변수": "보장 한도(급부)", "낙관(예산↓)": 24534, "기준": 30668,
              "보수(예산↑)": 36802, "swing": 12268, "swing%기준": 40.0, "근거": "x"}]),
@@ -485,6 +494,10 @@ def test_m7_report_renders_all_required_sections():
     assert "구조변화" in md and "미반영" in md             # 외삽 한계 노트
     # 2층 AI 검증 + 베이스라인 정직 비교
     assert "baseline 채택" in md and "0.565" in md
+    # ★복지가중 목적함수 + 동률 정직 공개 + 섭동 증거 + 역산 안 함
+    assert "복지가중" in md and "머릿수" in md
+    assert "동률" in md and "역산" in md            # 조작 차단 투명성
+    assert "섭동" in md                             # Option5 증거
 
 
 def test_m7_collect_keys_and_pricing_invariant():
@@ -493,10 +506,50 @@ def test_m7_collect_keys_and_pricing_invariant():
     from src.optimize import premium
     c = integrated_report.collect("경기도")
     for k in ["m0_envelope", "moduleA", "m2", "loro", "m5", "trend",
-              "lp", "tornado", "multiyear", "cliff"]:
+              "lp", "weight_sens", "perturbation", "tornado", "multiyear", "cliff"]:
         assert k in c
     # pricing = M0 백본(계리 보험료)와 일치 — 외삽 주입 없음
     assert abs(c["m5"]["gross_pc"] - round(premium.actuarial_premium("경기도").gross_pc)) <= 1
+
+
+# --- Option1/Option5 보완책 검증 -------------------------------------------
+
+def test_lp_default_objective_is_welfare_not_headcount():
+    """LP 기본 목적이 복지가중(중대도)이며, 가중치는 결과 아닌 독립 근거(사망>장해>경상)."""
+    full = budget.expected_claims("경기도").total_claims * budget.DEFAULT_LOADING
+    lp = budget.optimize_benefit_lp("경기도", full * 0.8)
+    assert lp["objective"] == "welfare_weighted"
+    w = budget.DEFAULT_WELFARE_WEIGHTS
+    # 중대도 순서: 사망 > 후유장해 > 경상(골절·입원). 골절=입원(knife-edge 미악용)
+    assert w["death_injury"] > w["disability"] > w["fracture"]
+    assert w["fracture"] == w["hospitalization"]
+
+
+def test_lp_guarantees_welfare_ge_greedy():
+    """LP는 '복지가중 혜택'에서 그리디 이상을 보장(머릿수 아님). 현 표는 동률."""
+    full = budget.expected_claims("경기도").total_claims * budget.DEFAULT_LOADING
+    cmp = budget.compare_allocation("경기도", full * 0.8)
+    assert cmp["objective"] == "welfare_weighted"
+    assert cmp["lp"]["welfare_benefit"] >= cmp["greedy"]["welfare_benefit"] - 1e-6
+
+
+def test_weight_sensitivity_not_cherry_picked():
+    """가중치 민감도: 원리적 가중(골절≥입원)에선 동률, 입원>골절에서만 LP우위 → 역산 아님."""
+    from src.optimize import scenarios
+    ws = scenarios.weight_sensitivity("경기도").set_index("가중셋")
+    for name in ws.index:
+        if "입원>골절" not in name and ws.loc[name, "LP_가중혜택"] is not None:
+            assert abs(ws.loc[name, "LP우위"]) < 1.0     # 원리적 가중 → 동률
+    w3 = [n for n in ws.index if "입원>골절" in n][0]
+    assert ws.loc[w3, "LP우위"] > 1.0                    # 입원>골절에서만 우위
+
+
+def test_perturbation_lp_robust_greedy_fragile():
+    """Option5: 우선순위 가정 섭동 시 LP가 그리디를 추월(표·예산·가중 불변)."""
+    from src.optimize import scenarios
+    pt = scenarios.perturbation_sensitivity("경기도")
+    assert (pt["그리디_섭동_수혜자"] <= pt["그리디_기본_수혜자"] + 1e-6).all()
+    assert (pt["LP_추가수혜_vs섭동"] > 0).all()           # LP가 섭동 그리디 추월
 
 
 def _run_all():

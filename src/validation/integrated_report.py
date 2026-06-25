@@ -91,15 +91,20 @@ def collect(schedule: str = "경기도") -> dict:
     slopes = projection.external_trend_slopes()
     c["trend"] = {k: round(v * 100, 2) for k, v in slopes.items()}
 
-    # M6 — 혜택최대화 LP vs 그리디 정직 비교 + 시나리오·토네이도·다년 밴드
+    # M6 — 복지가중 LP vs 그리디 정직 비교 + 시나리오·토네이도·다년 밴드
     full = budget.expected_claims(schedule).total_claims * budget.DEFAULT_LOADING
     cmp = budget.compare_allocation(schedule, full * 0.8)
     c["lp"] = {
         "budget": round(full * 0.8),
+        "objective": cmp["objective"],
+        "lp_welfare": cmp["lp"]["welfare_benefit"],
+        "greedy_welfare": cmp["greedy"]["welfare_benefit"],
+        "lp_gain_welfare": round(cmp["lp_gain_welfare"] or 0.0, 1),
         "lp_beneficiaries": cmp["lp"]["beneficiaries"],
         "greedy_beneficiaries": cmp["greedy"]["beneficiaries"],
-        "lp_gain": round(cmp["lp_gain_beneficiaries"] or 0.0, 1),
     }
+    c["weight_sens"] = scenarios.weight_sensitivity(schedule)
+    c["perturbation"] = scenarios.perturbation_sensitivity(schedule)
     c["tornado"] = scenarios.tornado(schedule)
     c["multiyear"] = scenarios.multiyear_band(schedule, years=[2024, 2027, 2030])
     cliff = projection.population_cliff("전국", 2024, [2024, 2030])
@@ -141,7 +146,7 @@ def build_report(schedule: str = "경기도", collected: dict | None = None) -> 
     w(f"| **모듈A** | 외인사망 셀패널 GBM 공간·시간 CV | 채택={a['adopt_gbm']}, 시간 캘리브 기울기 **{a['temporal_calib']}**({a['years'][0]}–{a['years'][1]}) |")
     w("| **M4** | 코호트 리스크 통합 | 지자체 현역 모집단 자동 산출 |")
     w(f"| **M5** | 계리 보험료(M0 직접관측 백본) | 1인당 총보험료 **{_fmt(m5['gross_pc'])}원** (CV {m5['cv']}, 로딩 {m5['loading_implied']}×) |")
-    w(f"| **M6** | 시나리오·민감도 + 혜택최대화 LP | 예산 80%서 LP 수혜 {_fmt(lp['lp_beneficiaries'])} = 그리디 {_fmt(lp['greedy_beneficiaries'])}(이 급부표선 그리디가 이미 최적, 추가수혜 {_fmt(lp['lp_gain'],1)}) |")
+    w(f"| **M6** | 시나리오·민감도 + **복지가중** LP(머릿수 아님) | 목적=복지가중 혜택. 예산 80%서 LP=그리디(현 표 동률, 역산 안 함). LP 필요성은 섭동·다중가중으로 입증 |")
     w("")
 
     # ── 2. 평가기준별 매핑 ───────────────────────────────────────
@@ -185,10 +190,12 @@ def build_report(schedule: str = "경기도", collected: dict | None = None) -> 
     w(
         "- 군 보험 리스크를 **공개 통계만으로 정량화**(claims 데이터 부재를 발생률 proxy·"
         "비례보정으로 우회) + 보장항목별 계리 보험료 산출.\n"
-        "- **예산 최적화 레이어**: 비용 최소화가 아닌 **예산 제약하 수혜 장병 최대화** "
-        "fractional-knapsack LP(scipy.linprog) + 고위험 완전보장 floor. 고정 우선순위 그리디와 "
-        "정직 비교 — 이 급부표·예산대에선 그리디가 이미 최적이라 동률이지만, LP는 **최적성 보장**과 "
-        "**임의 혜택가중치·floor 변경 시 자동 재최적화**(그리디 휴리스틱이 못 하는 일반화)를 제공한다.\n"
+        "- **예산 최적화 레이어 — 미션 정합 목적함수**: 비용 최소화가 아니라 **예산 제약하 "
+        "복지가중 혜택 최대화** fractional-knapsack LP(scipy.linprog) + 고위험 완전보장 floor.\n"
+        "  · *왜 머릿수가 아니라 가중 혜택인가*: 머릿수 최대화는 밀도=1/지급액이라 **싼 보장을 "
+        "잔뜩 주는 쪽으로 퇴화**한다. 미션은 '더 많은 머릿수에 싼 혜택'이 아니라 '더 많은 장병이 "
+        "**더 많은(중대한) 혜택**'이므로, 목적을 사건 중대도(사망>후유장해>경상)로 가중한다. "
+        "**가중치는 LP 결과에서 역산하지 않고 GBD 장애가중 류 독립 근거로 사전 고정**한다.\n"
     )
 
     w("### 2-4. 발전가능성")
@@ -227,6 +234,36 @@ def build_report(schedule: str = "경기도", collected: dict | None = None) -> 
         f"**과거 추세 외삽이며 구조변화(정책·인구·사회환경)는 미반영**.\n"
     )
 
+    w("### 3-3. 복지가중 LP — 정직 비교(조작 차단 장치 포함)")
+    lp = c["lp"]
+    w(
+        f"목적함수를 **머릿수 → 복지가중 혜택**으로 교체(미션 정합). 예산 80%에서 그리디와 "
+        f"LP의 복지가중 혜택은 **{_fmt(lp['greedy_welfare'],1)} = {_fmt(lp['lp_welfare'],1)} (동률)**.\n\n"
+        f"**왜 동률인가(정직)**: 고위험 floor가 고가·희소 항목(사망 등)을 양쪽 다 완전보장으로 "
+        f"고정하고, 그 위 재량 항목이 골절·입원 **2개뿐·지급액 거의 동일(30.0만≈31.6만)** — "
+        f"이 knife-edge에서 그리디의 우선순위가 마침 밀도최적과 일치한다. **가중치를 바꿔 LP를 "
+        f"억지로 이기게 만들지 않는다.**\n"
+    )
+    w("**① 가중치 민감도 — LP 우위가 특정 가중에서만 나오는지 전부 공개:**")
+    ws = c["weight_sens"]
+    w("| 가중 셋(독립근거) | 그리디 | LP | LP우위 | 비고 |")
+    w("|---|--:|--:|--:|---|")
+    for _, r in ws.iterrows():
+        w(f"| {r['가중셋']} | {_fmt(r['그리디_가중혜택'],1)} | {_fmt(r['LP_가중혜택'],1)} | "
+          f"{_fmt(r['LP우위'],1)} | {r['비고']} |")
+    w("\n→ 원리적 가중(W0 머릿수·W1 GBD·W2 중대도, 모두 골절≥입원)에선 **동률**, "
+      "입원>골절(W3)에서만 LP 우위 → '복지가중이 무조건 LP를 이기게 한다'고 주장하지 않는다.\n")
+    w("**② 섭동 민감도(Option5) — 그리디 우선순위 가정만 흔들면 LP가 견고히 우위:**")
+    pt = c["perturbation"]
+    w("| 예산 | 그리디(기본) | 그리디(섭동) | LP(불변) | LP 추가수혜 |")
+    w("|---|--:|--:|--:|--:|")
+    for _, r in pt.iterrows():
+        w(f"| {r['예산(full대비)']} | {_fmt(r['그리디_기본_수혜자'],1)} | {_fmt(r['그리디_섭동_수혜자'],1)} | "
+          f"{_fmt(r['LP_수혜자(불변)'],1)} | +{_fmt(r['LP_추가수혜_vs섭동'],1)} |")
+    w("\n→ 표·예산·가중 불변, **그리디 우선순위 가정만 입원先으로** 바꾸면 그리디는 즉시 "
+      "suboptimal(−23~46명), LP는 가정 무관하게 최적 유지. **그리디 최적성이 '운 좋은 가정'에 "
+      "의존함**을 정량 입증 — LP의 최적성 보장이 현실에서 load-bearing 하다.\n")
+
     # ── 4. 정직성·한계 ───────────────────────────────────────────
     w("## 4. 정직성·한계 종합")
     w(
@@ -243,6 +280,10 @@ def build_report(schedule: str = "경기도", collected: dict | None = None) -> 
         "6.8만~10.5만 부합).\n"
         "7. **pricing 불변 원칙** — 현재 보험료·예산은 **M0 직접관측 백본** 고정. GBM 외삽은 "
         "미래 투영 시나리오에만 쓰며 현재가에 주입하지 않는다(MECE envelope 보존).\n"
+        "8. **최적화 동률의 정직 공개** — 현 급부표는 floor 위 재량 항목이 골절·입원 2개뿐·"
+        "지급액 거의 동일(knife-edge)이라, 복지가중 LP가 그리디와 **동률**이다. 이를 숨기거나 "
+        "가중치를 역산해 LP를 이기게 만들지 않는다. LP의 가치는 (a) 미션 정합 목적함수(머릿수 아님), "
+        "(b) 최적성 보장, (c) 섭동·다중제약 하 견고성으로 제시한다(3-3).\n"
     )
 
     # ── 5. 데이터 출처·연도·라이선스 ─────────────────────────────

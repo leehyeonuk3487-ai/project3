@@ -155,14 +155,20 @@ uvicorn src.api.main:app --reload   #  http://127.0.0.1:8000
   풀(화천군 CV 0.30)은 대형(경기 0.11)보다 1인당 위험할증↑** — 신뢰도/풀링 효과를 계리적으로
   반영. α·사업비율 민감도표 제공(가정 노출).
 
-- **M6 시나리오·민감도 + 혜택최대화 LP** (`optimize/budget.optimize_benefit_lp`,
-  `optimize/scenarios.py`, `models/projection.py`) — ① **예산 제약하 수혜 장병 최대화**
-  fractional-knapsack LP(scipy.linprog) + 생명·중대장해 완전보장 floor(고위험 배제 금지);
-  고정 우선순위 그리디와 정직 비교(`compare_allocation`). ② 민감도 토네이도(보장한도·사업비가
-  최대 변동요인) + 인구절벽(전국 20대남 336만→270만, −19.7%)×외인추세 다년 예산밴드.
-  ③ **미래 외인추세는 parametric 로그선형 외삽**(GBM은 트리라 추세 외삽 불가→공간검증 역할
-  유지) — 점추정 아닌 **밴드**(장기 −6.9%/년·둔화 −3.3%/년·평탄 0%), 구조변화 미반영 한계 명시.
-  **★현재 pricing은 M0 직접관측 백본 불변, 외삽은 미래 투영에만 사용**(MECE envelope 보존).
+- **M6 시나리오·민감도 + 복지가중 LP** (`optimize/budget.optimize_benefit_lp`,
+  `optimize/scenarios.py`, `models/projection.py`) — ① **예산 제약하 복지가중 혜택 최대화**
+  fractional-knapsack LP(scipy.linprog) + 생명·중대장해 완전보장 floor(고위험 배제 금지).
+  ★목적함수를 '머릿수'가 아니라 '중대도 가중 혜택'으로 둔다 — 머릿수 최대화는 밀도=1/지급액이라
+  *싼 보장 편향*으로 퇴화(미션 '더 많은 **혜택**'과 불일치). 가중치는 LP 결과서 역산하지 않고
+  GBD 장애가중 류 **독립 근거로 사전 고정**(`DEFAULT_WELFARE_WEIGHTS`). 고정 우선순위 그리디와
+  정직 비교(`compare_allocation`, 복지가중 기준). ★현 급부표는 floor 위 재량항목이 골절·입원
+  2개뿐·지급액 거의 동일(knife-edge)이라 LP=그리디 **동률** — 이를 숨기지 않고, LP 필요성은
+  (a)가중치 민감도(`weight_sensitivity`: 입원>골절 가중에서만 우위 → 역산 아님 투명 공개),
+  (b)섭동 민감도(`perturbation_sensitivity`: 우선순위 가정만 흔들면 LP가 그리디 +23~46명 추월)로 입증.
+  ② 민감도 토네이도(보장한도·사업비가 최대 변동요인) + 인구절벽(전국 20대남 336만→270만, −19.7%)×
+  외인추세 다년 예산밴드. ③ **미래 외인추세는 parametric 로그선형 외삽**(GBM은 트리라 추세 외삽
+  불가→공간검증 역할 유지) — 점추정 아닌 **밴드**(장기 −6.9%/년·둔화 −3.3%/년·평탄 0%), 구조변화
+  미반영 한계 명시. **★현재 pricing은 M0 직접관측 백본 불변, 외삽은 미래 투영에만 사용**(MECE envelope 보존).
 - **M7 통합 리포트** (`validation/integrated_report.py`) — 전 모듈을 라이브 호출해 평가기준별
   매핑(공공데이터·AI검증·독창성·발전가능성)·정직성/한계·윤리/미션·출처/라이선스를 하나의
   마크다운으로 종합. 생성: `python -m src.validation.integrated_report` → `reports/M7_integrated_report.md`.
