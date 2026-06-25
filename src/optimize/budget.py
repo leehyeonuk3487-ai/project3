@@ -280,7 +280,9 @@ def compare_allocation(
         "lp": {"coverage_scale": lp.get("coverage_scale"),
                "beneficiaries": round(lp_benef, 1),
                "feasible": lp.get("feasible")},
-        "lp_gain_beneficiaries": round(lp_benef - g_benef, 1)
+        # +0.0 로 부호있는 0(-0.0)을 0.0으로 정규화. floor 절사(≤1e-6 보장률)로
+        # LP가 그리디와 동률일 때 -0.0 이 뜨는 표시 결함 제거(실질 수혜자 동일).
+        "lp_gain_beneficiaries": round(lp_benef - g_benef, 1) + 0.0
         if lp.get("feasible") else None,
     }
 
