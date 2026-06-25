@@ -50,6 +50,9 @@ DEATH_CAUSE_CSV = RAW / "kosis_death_cause" / "death_cause_by_region_sex_age5.cs
 # M0: 사인분류 사망(시도×사인×성×5세연령×연도, 사망자수+사망률, ICD 코드 동반).
 #     22개 상호배타 leaf — 질병/외인/자살/기타 4범주 직접 분리(src/data/mortality.py).
 DEATH_CAUSE_BY_CAUSE_CSV = RAW / "kosis_death_cause" / "death_cause_by_region_sex_age5_detail.csv"
+# 국방부 사망사고 통계(2011–2025, data.go.kr 개최기관 직접). 군기사고/안전사고 건수 +
+#   군·민간 자살률(10만명당). 군 코호트 proxy 타당성 검증·자살 보정용(전국 단위).
+MND_DEATH_ACCIDENT_CSV = RAW / "kosis_death_cause" / "death_cause_mnd.csv"
 
 # 병무청
 MMA_DIR = RAW / "mma_judgment_status"

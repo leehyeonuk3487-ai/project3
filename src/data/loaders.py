@@ -274,6 +274,49 @@ def load_death_cause() -> pd.DataFrame:
     return deaths.merge(rate, on=["sido", "sex_name", "age5", "year"], how="outer")
 
 
+# 국방부 사망사고 통계 — 위치 기반 컬럼(원본 헤더가 인코딩 손상으로 U+FFFD 대체문자라
+#   한글 복구 불가, 컬럼 '순서·구조'는 온전 → 개최기관 제공 스키마대로 위치 매핑).
+#   스키마: idx, 년도, 군기사고(자살·총기·폭행·기타), 안전사고(차량·함정항공·폭발·
+#           추락충격·익사·화재·기타), 군자살률(10만명당), 민간자살률(10만명당).
+_MND_COLS = ["idx", "year",
+             "disc_suicide", "disc_gun", "disc_assault", "disc_other",
+             "safe_vehicle", "safe_shipair", "safe_explosion", "safe_fall",
+             "safe_drown", "safe_fire", "safe_other",
+             "mil_suicide_rate", "civ_suicide_rate"]
+_MND_SAFETY = ["safe_vehicle", "safe_shipair", "safe_explosion", "safe_fall",
+               "safe_drown", "safe_fire", "safe_other"]
+_MND_DISC_OTHER = ["disc_gun", "disc_assault", "disc_other"]
+
+
+def load_mnd_death_accidents() -> pd.DataFrame:
+    """국방부 사망사고 통계(2011–2025) — 군 코호트 proxy 검증·자살 보정용(전국 단위).
+
+    ★헤더 한글이 원본 인코딩 손상(U+FFFD)이라 위치 기반으로 컬럼명을 부여한다(개최기관
+      제공 스키마 순서 + 숫자 sanity check로 검증). 사고 항목은 '건수(명)', 자살률은
+      '10만명당'. 시도분해·연령분해 없음 → 전국 단위로만 쓴다.
+
+    파생:
+      · military_suicide        = disc_suicide               (자살, 면책 보정용)
+      · military_external       = 안전사고 7종 합            (외인 검증용)
+      · military_discipline_other = 총기+폭행+기타           (★작전/징계성 — 외인에 합치지
+                                                              않음, 검증·보정 제외)
+      · troops_implied          = disc_suicide / mil_suicide_rate × 1e5  (병력 분모 역산;
+                                  2011 63.8만→2025 54.9만, 알려진 병력 추이와 정합)
+    ★2025 민간자살률은 결측(원본 빈칸) → NaN 유지(0/빈값 대체 금지). 비율 계산에서 제외.
+    """
+    path = config.MND_DEATH_ACCIDENT_CSV
+    df = pd.read_csv(path, header=0, names=_MND_COLS,
+                     encoding=detect_encoding(path)).drop(columns="idx")
+    # 숫자화(2025 민간자살률 빈칸 → NaN)
+    for c in _MND_COLS[1:]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df["military_suicide"] = df["disc_suicide"]
+    df["military_external"] = df[_MND_SAFETY].sum(axis=1)
+    df["military_discipline_other"] = df[_MND_DISC_OTHER].sum(axis=1)
+    df["troops_implied"] = df["disc_suicide"] / df["mil_suicide_rate"] * 1e5
+    return df
+
+
 # ---------------------------------------------------------------------------
 # 병무청 병역판정 신체검사 통계 (청별, 연도별 와이드)
 #   다중 헤더(연도 / 구분 / 급|체급 / 단위)라 일반 reshaper 대신 전용 파서를 쓴다.

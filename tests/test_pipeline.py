@@ -475,6 +475,16 @@ def _synthetic_collected():
             {"year": 2024, "population": 98132, "optimistic_총예산": 2.7e9,
              "base_총예산": 2.7e9, "conservative_총예산": 2.7e9}]),
         "cliff": {"y2024": 3364971, "y2030": 2703130, "pct": -19.7},
+        "military": {
+            "source": "국방부 사망사고 통계 2011–2025 (data.go.kr)",
+            "suicide": {"adopted_ratio": 0.443, "recent5": 0.443, "full": 0.397,
+                        "excluded_years": [2025],
+                        "direction": "군 자살률이 민간의 약 44% → 과대추정 약 2.3배."},
+            "external": {"trend_r": 0.881, "level_ratio": 0.318,
+                         "overestimate_factor": 3.14,
+                         "verdict": "추세 동행, 수준 과대추정."},
+            "pricing_impact": "없음 — M0 직접관측 백본 불변.",
+        },
     }
 
 
@@ -498,6 +508,10 @@ def test_m7_report_renders_all_required_sections():
     assert "복지가중" in md and "머릿수" in md
     assert "동률" in md and "역산" in md            # 조작 차단 투명성
     assert "섭동" in md                             # Option5 증거
+    # ★군 코호트 proxy 검증(국방부) 섹션
+    assert "군 코호트 proxy 타당성 검증" in md
+    assert "국방부" in md and "면책" in md
+    assert "pricing" in md.lower() or "M0 직접관측" in md   # 미주입 명시
 
 
 def test_m7_collect_keys_and_pricing_invariant():
@@ -506,7 +520,8 @@ def test_m7_collect_keys_and_pricing_invariant():
     from src.optimize import premium
     c = integrated_report.collect("경기도")
     for k in ["m0_envelope", "moduleA", "m2", "loro", "m5", "trend",
-              "lp", "weight_sens", "perturbation", "tornado", "multiyear", "cliff"]:
+              "lp", "weight_sens", "perturbation", "tornado", "multiyear",
+              "cliff", "military"]:
         assert k in c
     # pricing = M0 백본(계리 보험료)와 일치 — 외삽 주입 없음
     assert abs(c["m5"]["gross_pc"] - round(premium.actuarial_premium("경기도").gross_pc)) <= 1
@@ -550,6 +565,58 @@ def test_perturbation_lp_robust_greedy_fragile():
     pt = scenarios.perturbation_sensitivity("경기도")
     assert (pt["그리디_섭동_수혜자"] <= pt["그리디_기본_수혜자"] + 1e-6).all()
     assert (pt["LP_추가수혜_vs섭동"] > 0).all()           # LP가 섭동 그리디 추월
+
+
+# --- 국방부 사망사고 통계: 군 코호트 proxy 검증 ----------------------------
+
+def test_mnd_loader_parses_and_2025_civ_missing():
+    df = loaders.load_mnd_death_accidents()
+    assert df["year"].min() == 2011 and df["year"].max() == 2025
+    # ★2025 민간자살률 결측 → NaN(0/빈값 대체 금지)
+    assert df.loc[df.year == 2025, "civ_suicide_rate"].isna().iloc[0]
+    assert df.loc[df.year == 2025, "mil_suicide_rate"].notna().iloc[0]   # 군은 존재
+
+
+def test_mnd_category_mapping_excludes_discipline_other():
+    """military_external = 안전사고 7종 합. 군기사고(총기·폭행·기타)는 외인에 미포함."""
+    df = loaders.load_mnd_death_accidents()
+    r = df[df.year == 2011].iloc[0]
+    assert r["military_external"] == r[loaders._MND_SAFETY].sum()
+    assert r["military_discipline_other"] == r[loaders._MND_DISC_OTHER].sum()
+    # 외인 합에 총기·폭행·기타가 섞이지 않음
+    assert "disc_gun" not in loaders._MND_SAFETY
+
+
+def test_mnd_troops_implied_plausible():
+    """병력 역산(자살건수/자살률)이 알려진 ROK 병력대(50만~70만)와 정합."""
+    df = loaders.load_mnd_death_accidents()
+    assert df["troops_implied"].between(5.0e5, 7.0e5).all()
+
+
+def test_suicide_adjustment_below_one_excludes_2025():
+    from src.validation import military_proxy
+    s = military_proxy.suicide_adjustment()
+    assert s["adopted"] < 1.0                       # 군 < 민간(과대추정 보정 방향)
+    assert 2025 in s["excluded_years"]              # 민간자살률 결측 → 제외
+    assert s["applies_to_pricing"] is False         # 면책·pricing 미주입
+
+
+def test_external_crossval_trend_and_level():
+    from src.validation import military_proxy
+    e = military_proxy.external_crossvalidation()
+    assert e["trend_pearson_r"] > 0.5               # 추세 동행
+    assert 0 < e["level_ratio_mil_over_gen"] < 1.0  # 군 수준이 일반보다 낮음(과대추정)
+    assert e["applies_to_pricing"] is False
+
+
+def test_military_validation_does_not_change_pricing():
+    """군 보정 모듈 호출 전후 M0 백본 보험료 불변(자동 주입 없음)."""
+    from src.validation import military_proxy
+    from src.optimize import premium
+    before = premium.actuarial_premium("경기도").gross_pc
+    _ = military_proxy.summary()                     # 검증 수행
+    after = premium.actuarial_premium("경기도").gross_pc
+    assert before == after
 
 
 def _run_all():

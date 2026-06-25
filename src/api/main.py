@@ -19,7 +19,7 @@ from ..data import benefits
 from ..models import (calibration, cell_panel, cohort, ecological, injury_ml,
                       population, rates, stratify)
 from ..optimize import budget, premium
-from ..validation import report
+from ..validation import military_proxy, report
 
 app = FastAPI(title="군복무 청년 상해보험 리스크·계리 대시보드")
 
@@ -129,6 +129,25 @@ def api_consistency():
             "disease_death_le_incidence_ok": con["disease_death_le_incidence_ok"],
             "m0_envelope": con["m0_envelope"],
             "rows": _records(con["table"].round(4))}
+
+
+@app.get("/api/military_validation")
+def api_military_validation():
+    """군 코호트 proxy 타당성 검증(국방부 사망사고 통계). pricing 미변경 — 정직성/검증용."""
+    s = military_proxy.suicide_adjustment()
+    e = military_proxy.external_crossvalidation()
+    return _clean({
+        "source": military_proxy.MND_SOURCE,
+        "category_map": military_proxy.CATEGORY_MAP,
+        "suicide": {"adopted_ratio": s["adopted"], "recent5": s["ratio_recent5_mean"],
+                    "full": s["ratio_full_mean"], "excluded_years": s["excluded_years"],
+                    "direction": s["direction"], "rows": _records(s["table"])},
+        "external": {"trend_pearson_r": e["trend_pearson_r"],
+                     "level_ratio_mil_over_gen": e["level_ratio_mil_over_gen"],
+                     "overestimate_factor": e["overestimate_factor"],
+                     "verdict": e["verdict"], "rows": _records(e["table"])},
+        "pricing_impact": "없음 — M0 직접관측 백본 불변, 민감도·정직성 병기만.",
+    })
 
 
 def _module_a_dict(r):
