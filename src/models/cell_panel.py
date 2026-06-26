@@ -98,22 +98,25 @@ def build_panel(target: str = "allcause", years: list[int] | None = None) -> pd.
 # 모델 + 베이스라인 (모두 per-person rate 예측)
 # ---------------------------------------------------------------------------
 
-def _fit_gbm(tr: pd.DataFrame):
+def _fit_gbm(tr: pd.DataFrame, features: list[str] | None = None):
     """가중 Poisson: label=rate, weight=person-years (offset Poisson과 등가).
 
     init_score offset 방식은 poisson_max_delta_step에 민감해 수렴이 불안정하므로,
     노출가중 rate 회귀(boost_from_average가 기저율을 잡음)로 동등하게 적합한다.
+    features=None이면 전체 FEATURES(ablation 시 부분집합 전달).
     """
     import lightgbm as lgb
+    feats = features if features is not None else FEATURES
     rate = tr["deaths"].values / tr["py"].values
-    dtr = lgb.Dataset(tr[FEATURES], label=rate, weight=tr["py"].values,
+    dtr = lgb.Dataset(tr[feats], label=rate, weight=tr["py"].values,
                       free_raw_data=False)
     return lgb.train(_LGB_PARAMS, dtr, num_boost_round=_LGB_ROUNDS)
 
 
-def _pred_gbm(booster, te: pd.DataFrame) -> np.ndarray:
+def _pred_gbm(booster, te: pd.DataFrame, features: list[str] | None = None) -> np.ndarray:
     # predict() = 예측 rate per person (노출가중 Poisson)
-    return np.clip(np.asarray(booster.predict(te[FEATURES])), 0.0, None)
+    feats = features if features is not None else FEATURES
+    return np.clip(np.asarray(booster.predict(te[feats])), 0.0, None)
 
 
 def _pred_simple_mean(tr: pd.DataFrame, te: pd.DataFrame) -> np.ndarray:
@@ -208,6 +211,23 @@ def temporal_cv(panel: pd.DataFrame, holdout_years: int = 2,
     cut = yrs[-holdout_years]
     folds = [(panel[panel["year"] < cut], panel[panel["year"] >= cut])]
     return _run_cv(panel, folds)
+
+
+def oos_spatial_predictions(panel: pd.DataFrame,
+                            features: list[str] | None = None) -> pd.DataFrame:
+    """leave-one-시도-out OOS 예측 rate(모든 셀). 캘리브레이션·예측구간 산정용.
+
+    각 시도를 빼고 적합한 GBM으로 그 시도 셀의 발생률을 예측 → 누수 없는 OOS 예측을
+    전 셀에 부여. features 부분집합 전달 시 ablation OOS도 가능.
+    """
+    out = panel.copy().reset_index(drop=True)
+    pred = np.full(len(out), np.nan)
+    for s in sorted(out["sido"].unique()):
+        mask = (out["sido"] == s).to_numpy()
+        booster = _fit_gbm(out[~mask], features)
+        pred[mask] = _pred_gbm(booster, out[mask], features)
+    out["pred_rate"] = pred
+    return out
 
 
 def external_gbm_surface(predict_year: int = 2024) -> pd.DataFrame:

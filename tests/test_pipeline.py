@@ -485,6 +485,17 @@ def _synthetic_collected():
                          "verdict": "추세 동행, 수준 과대추정."},
             "pricing_impact": "없음 — M0 직접관측 백본 불변.",
         },
+        "ai": {
+            "cv_deviance_reduction": {"공간CV(leave-1-시도-out)": 37.5,
+                                      "시간CV(최근2년 홀드아웃)": 81.1},
+            "calib_slope_oos": 0.991, "chs_deviance_reduction_pct": 37.9,
+            "pi_coverage": 0.911,
+            "efficiency": {"gbm_fit_ms": 18.0, "lp_solver_ms": 1.66,
+                           "deterministic": True},
+        },
+        "ai_calib": pd.DataFrame([
+            {"bin": 1, "예측률_per100k": 8.93, "관측률_per100k": 8.18, "n_cells": 134},
+            {"bin": 5, "예측률_per100k": 31.49, "관측률_per100k": 31.13, "n_cells": 133}]),
     }
 
 
@@ -504,6 +515,10 @@ def test_m7_report_renders_all_required_sections():
     assert "구조변화" in md and "미반영" in md             # 외삽 한계 노트
     # 2층 AI 검증 + 베이스라인 정직 비교
     assert "baseline 채택" in md and "0.565" in md
+    # ★AI 성능 아티팩트(A+B): CV deviance 감소·OOS 캘리브레이션·ablation·예측구간·효율성
+    assert "deviance" in md and "캘리브레이션" in md
+    assert "ablation" in md and "예측구간" in md
+    assert "0.991" in md and "linprog" in md
     # ★복지가중 목적함수 + 동률 정직 공개 + 섭동 증거 + 역산 안 함
     assert "복지가중" in md and "머릿수" in md
     assert "동률" in md and "역산" in md            # 조작 차단 투명성
@@ -521,7 +536,7 @@ def test_m7_collect_keys_and_pricing_invariant():
     c = integrated_report.collect("경기도")
     for k in ["m0_envelope", "moduleA", "m2", "loro", "m5", "trend",
               "lp", "weight_sens", "perturbation", "tornado", "multiyear",
-              "cliff", "military"]:
+              "cliff", "military", "ai", "ai_calib"]:
         assert k in c
     # pricing = M0 백본(계리 보험료)와 일치 — 외삽 주입 없음
     assert abs(c["m5"]["gross_pc"] - round(premium.actuarial_premium("경기도").gross_pc)) <= 1
@@ -615,6 +630,54 @@ def test_military_validation_does_not_change_pricing():
     from src.optimize import premium
     before = premium.actuarial_premium("경기도").gross_pc
     _ = military_proxy.summary()                     # 검증 수행
+    after = premium.actuarial_premium("경기도").gross_pc
+    assert before == after
+
+
+# --- AI 성능 검증 아티팩트 (A+B) -------------------------------------------
+
+def test_ai_gbm_beats_baselines_on_external_cv():
+    """외인 GBM이 공간·시간 CV에서 두 베이스라인 deviance를 모두 이긴다(감소율>0)."""
+    from src.validation import ai_performance
+    cvd = ai_performance.cv_deviance_comparison("external")
+    assert cvd["adopt_gbm"] is True
+    for v in cvd["deviance_reduction"].values():
+        assert v > 0                                 # 베이스라인 대비 deviance 감소
+
+
+def test_ai_oos_calibration_near_identity():
+    """OOS(leave-1-시도-out) 캘리브레이션 기울기가 1 근처 → 잘 보정됨."""
+    from src.validation import ai_performance
+    cal = ai_performance.calibration_reliability("external")
+    assert 0.8 <= cal["calib_slope_oos"] <= 1.2
+
+
+def test_ai_chs_ablation_contributes():
+    """건강행태(CHS) 특성이 OOS deviance를 줄인다(지역 위험요인 기여 입증)."""
+    from src.validation import ai_performance
+    abl = ai_performance.chs_ablation("external")
+    assert abl["chs_deviance_reduction_pct"] > 0
+    assert abl["deviance_full"] < abl["deviance_struct_only"]
+
+
+def test_ai_prediction_interval_coverage_reasonable():
+    from src.validation import ai_performance
+    pic = ai_performance.prediction_interval_coverage("external")
+    assert 0.8 <= pic["empirical_coverage"] <= 1.0   # 과신/과소신뢰 아님
+
+
+def test_ai_efficiency_deterministic_and_fast():
+    from src.validation import ai_performance
+    eff = ai_performance.efficiency_metrics()
+    assert eff["deterministic_gbm"] and eff["deterministic_lp"]
+    assert eff["lp_solver_ms"] < 100                 # 최적화 코어 빠름
+
+
+def test_ai_artifacts_do_not_change_pricing():
+    from src.validation import ai_performance
+    from src.optimize import premium
+    before = premium.actuarial_premium("경기도").gross_pc
+    _ = ai_performance.scorecard()
     after = premium.actuarial_premium("경기도").gross_pc
     assert before == after
 

@@ -19,7 +19,7 @@ from ..data import benefits
 from ..models import (calibration, cell_panel, cohort, ecological, injury_ml,
                       population, rates, stratify)
 from ..optimize import budget, premium
-from ..validation import military_proxy, report
+from ..validation import ai_performance, military_proxy, report
 
 app = FastAPI(title="군복무 청년 상해보험 리스크·계리 대시보드")
 
@@ -186,6 +186,29 @@ def _ai_performance():
 @app.get("/api/ai_performance")
 def api_ai_performance():
     return _ai_performance()
+
+
+@lru_cache(maxsize=1)
+def _ai_artifacts():
+    """외인 GBM 검증 아티팩트: CV deviance·OOS 캘리브레이션·CHS ablation·예측구간·효율성."""
+    cvd = ai_performance.cv_deviance_comparison()
+    cal = ai_performance.calibration_reliability()
+    return {
+        "cv_deviance": {"adopt_gbm": cvd["adopt_gbm"],
+                        "deviance_reduction": cvd["deviance_reduction"],
+                        "rows": _records(cvd["table"])},
+        "calibration": {"calib_slope_oos": cal["calib_slope_oos"],
+                        "rows": _records(cal["table"])},
+        "chs_ablation": _clean(ai_performance.chs_ablation()),
+        "prediction_interval": _clean(ai_performance.prediction_interval_coverage()),
+        "efficiency": _clean(ai_performance.efficiency_metrics()),
+        "scorecard": _clean(ai_performance.scorecard()),
+    }
+
+
+@app.get("/api/ai_artifacts")
+def api_ai_artifacts():
+    return _ai_artifacts()
 
 
 @lru_cache(maxsize=1)

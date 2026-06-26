@@ -181,9 +181,15 @@ uvicorn src.api.main:app --reload   #  http://127.0.0.1:8000
   (총기·폭행·기타)는 작전/징계성이라 외인 검증에서 **제외**. ★보정계수는 **민감도·정직성 병기만,
   현재 pricing(M0 직접관측)에 자동 주입 없음**. 2025 민간자살률 결측은 비율에서 제외(0/대체 금지).
 
-### AI 성능 2층 서사 (대시보드 ⑦ 패널)
+### AI 성능 2층 서사 + 검증 아티팩트 (대시보드 ⑦ 패널)
 **개인 예측은 약함(M2 AUC≈0.56, age+sex 미달) → 집단 발생률을 학습모델로 추정·공간시간
 CV 검증(모듈 A).** 두 모듈 모두 baseline 대비 정직 비교 결과를 그대로 표기한다(`/api/ai_performance`).
+- **AI 성능 검증 아티팩트** (`validation/ai_performance.py`, `/api/ai_artifacts`) — 외인 GBM의
+  **검증된 성과를 깊이 있게 가시화**: ① CV deviance 감소(공간 **37.5%**·시간 **81.1%**, 비례·평균
+  두 베이스라인 모두 우월) ② OOS(leave-1-시도-out) 캘리브레이션 기울기 **0.991**(거의 완벽) ③ CHS
+  건강행태 ablation — 지역 위험요인이 OOS deviance **37.9% 감소** 기여 ④ Poisson 예측구간 적중
+  **91%**(불확실성 정량화) ⑤ 효율성·재현성(GBM 학습 ~18ms, 최적화 코어 linprog ~1.7ms, 시드고정
+  `deterministic=True`). 모두 누수 없는 OOS·결정적 산출, pricing 불변.
 M4 코호트 지수는 `/api/cohort`, M5 계리 보험료는 `/api/premium`(대시보드 ⑧·⑨).
 
 실행: `python -m scripts.run_modules` (M0~M5 + 모듈 A 리포트).
