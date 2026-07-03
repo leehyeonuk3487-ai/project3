@@ -17,7 +17,13 @@
   main { display:grid; grid-template-columns: repeat(2, 1fr); gap:16px; padding:20px 28px; max-width:1200px; }
   .card { background:var(--card); border:1px solid #243240; border-radius:12px; padding:16px 18px; }
   .card.full { grid-column: 1 / -1; }
-  h2 { font-size:15px; margin:0 0 10px; color:var(--accent); }
+  h2 { font-size:15px; margin:0 0 6px; color:var(--accent); }
+  h3 { font-size:13.5px; margin:14px 0 6px; color:var(--ink); }
+  .desc { color:var(--ink); font-size:12.5px; opacity:.9; margin:0 0 12px;
+          background:#11202c; border-left:3px solid var(--accent);
+          padding:8px 11px; border-radius:0 7px 7px 0; line-height:1.55; }
+  .desc b { color:var(--accent); }
+  .tip { color:var(--warn); font-size:12px; margin:8px 0 0; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th, td { text-align:right; padding:5px 8px; border-bottom:1px solid #223040; }
   th:first-child, td:first-child { text-align:left; }
@@ -38,95 +44,136 @@
 </head>
 <body>
 <header>
-  <h1>군복무 청년 상해보험 — 리스크 층화·계리 추정 대시보드</h1>
-  <div class="muted">공개 통계(KDCA·KOSIS·CHS·KNHANES·병무청) 기반 · 실데이터</div>
+  <h1>군복무 청년 상해보험 — 위험 분석·보험료·예산 대시보드</h1>
+  <div class="muted">병무청·질병관리청·통계청 등 공개 정부 통계로 만든 실제 데이터입니다.</div>
+  <div class="desc" style="margin-top:12px; border-left-color:var(--warn)">
+    <b>이 대시보드는 무엇인가요?</b> 군에 복무하는 20대 남성이 어떤 사고·질병을 얼마나 겪는지
+    공개 통계로 분석하고, 그 위험에 맞는 <b>보험료</b>와 <b>예산 배분</b>을 계산해 보여줍니다.
+    아래 카드 ①~⑨를 순서대로 보면 <b>데이터 → 위험 분석 → AI 검증 → 보험료·예산</b>으로 이어집니다.
+    각 카드 위의 파란 설명 상자가 그 칸이 무슨 뜻인지 알려줍니다.
+  </div>
   <div class="note" id="note">로딩 중…</div>
 </header>
 
 <main>
   <section class="card">
-    <h2>① 보장항목별 시도 발생률 (20대 남성, 1,000명당/년)</h2>
+    <h2>① 지역별 사고·질병 발생률</h2>
+    <div class="desc">지역(시도)마다 20대 남성 <b>1,000명당 1년에</b> 골절·입원·상해사망 등이
+      몇 건 생기는지 보여줍니다. 막대가 높을수록 그 지역·항목의 위험이 큽니다.</div>
     <canvas id="ratesChart"></canvas>
   </section>
 
   <section class="card">
-    <h2>② 집단 리스크 층화 + IRR</h2>
-    <div class="metric"><div><b id="irr">–</b><span>고위험/저위험 IRR</span></div></div>
+    <h2>② 지역을 위험도로 나누기</h2>
+    <div class="desc">지역을 건강 상태에 따라 <b>위험이 높은 곳 / 낮은 곳</b>으로 묶었습니다.
+      옆의 <b>위험배수</b>가 3.95라면, 고위험 지역이 저위험 지역보다 약 <b>4배</b> 위험하다는 뜻입니다.
+      개인을 예측하는 게 아니라 지역 집단을 나눈 것입니다.</div>
+    <div class="metric"><div><b id="irr">–</b><span>고위험 ÷ 저위험 (위험배수)</span></div></div>
     <table id="stratTable"></table>
-    <div class="muted" style="margin-top:8px">개인 예측이 아닌 집단 층화. 고위험 층일수록 흡연·비만 유병률↑.</div>
+    <div class="muted" style="margin-top:8px">고위험으로 묶인 지역일수록 흡연·비만 비율이 높습니다.</div>
   </section>
 
   <section class="card">
-    <h2>③ 생태학적 회귀 — 위험요인별 발생률비(SD당 IRR)</h2>
+    <h2>③ 어떤 생활습관이 위험을 키우나</h2>
+    <div class="desc">흡연·음주·비만 같은 지역 건강습관이 사고·질병과 얼마나 연결되는지 봅니다.
+      값이 <b>1보다 크면</b> 그 습관이 많은 지역일수록 위험도 높다는 뜻입니다.
+      (지역 단위 분석이라 개인의 인과관계로 단정하진 않습니다.)</div>
     <div class="metric">
-      <div><b id="ecoN">–</b><span>관측 시도 수</span></div>
-      <div><b id="ecoDev">–</b><span>편차 설명비율</span></div>
+      <div><b id="ecoN">–</b><span>분석한 지역 수</span></div>
+      <div><b id="ecoDev">–</b><span>설명력(높을수록 잘 설명)</span></div>
     </div>
     <table id="ecoTable"></table>
-    <div class="muted" style="margin-top:8px">생태학적 연관(개인 인과 아님). 17개 시도 한계로 흡연만 robust.</div>
+    <div class="muted" style="margin-top:8px">지역이 17곳뿐이라, 통계적으로 확실한 건 흡연입니다.</div>
   </section>
 
   <section class="card">
-    <h2>④ LORO 캘리브레이션 검증 (+예측구간)</h2>
+    <h2>④ 예측이 실제와 맞는지 검증</h2>
+    <div class="desc">한 지역을 일부러 빼고 나머지로 학습한 뒤, <b>빼둔 지역</b>을 얼마나 잘 맞히는지
+      시험했습니다(처음 보는 지역 시험). <b>평균 오차</b>가 작을수록 정확합니다 — 우리 모델은
+      4.00으로 단순 전국평균(5.82)보다 <b>31% 정확</b>합니다. 점이 노란 대각선에 붙을수록
+      예측이 실제와 일치합니다.</div>
     <div class="metric">
-      <div><b id="maeModel">–</b><span>모델 MAE</span></div>
-      <div><b id="maeBase">–</b><span>베이스라인 MAE</span></div>
-      <div><b id="maeImp">–</b><span>개선율</span></div>
-      <div><b id="piCov">–</b><span>95% 예측구간 적중</span></div>
+      <div><b id="maeModel">–</b><span>우리 모델 평균오차 (작을수록↑)</span></div>
+      <div><b id="maeBase">–</b><span>단순 전국평균 평균오차</span></div>
+      <div><b id="maeImp">–</b><span>얼마나 더 정확한가</span></div>
+      <div><b id="piCov">–</b><span>예측범위 안에 실제가 든 비율</span></div>
     </div>
     <canvas id="loroChart"></canvas>
   </section>
 
   <section class="card full">
-    <h2>⑤ 예산 최적화 — 지자체 급부 스케줄 (현역 N 자동산출)</h2>
+    <h2>⑤ 예산으로 보장 짜기 · 직접 해보세요</h2>
+    <div class="desc">지자체를 고르고 <b>[계산]</b>을 누르면, 그 지역 복무 인원과 보장 항목별
+      예상 지급액, 그리고 <b>1인당 보험료</b>를 계산합니다. <b>연간 예산</b>을 넣으면, 그 예산 안에서
+      장병 혜택이 가장 커지도록 보장 구성을 다시 짭니다(생명·중대 장해는 반드시 포함).
+      직접 조작할 수 있는 칸입니다.</div>
     <div class="controls">
       <div><label>지자체</label><br><select id="schedSel"></select></div>
-      <div><label>현역 인원(비우면 자동: 병무청·인구추계)</label><br><input id="popInput" type="number" placeholder="자동" step="1000" /></div>
-      <div><label>연간 예산(원, 비우면 전체보장)</label><br><input id="budgetInput" type="number" placeholder="예: 1500000000" /></div>
+      <div><label>복무 인원 (비우면 자동 계산)</label><br><input id="popInput" type="number" placeholder="자동" step="1000" /></div>
+      <div><label>연간 예산 (비우면 전체보장)</label><br><input id="budgetInput" type="number" placeholder="예: 1500000000" /></div>
       <div><button id="calcBtn">계산</button></div>
     </div>
+    <div class="tip" id="calcStatus">⏳ 이 칸(⑤·⑥)은 실시간 계산이라 <b>5~10초</b> 걸릴 수 있습니다. 잠시만 기다려 주세요.</div>
     <div class="metric">
-      <div><b id="popOut">–</b><span>현역 N</span></div>
-      <div><b id="perCapita">–</b><span>1인당 기대청구액</span></div>
-      <div><b id="premium">–</b><span>권장 보험료(×1.25)</span></div>
-      <div><b id="reported">–</b><span>보고된 보험료</span></div>
-      <div><b id="optPremium">–</b><span>예산조정 후 보험료</span></div>
+      <div><b id="popOut">–</b><span>복무 인원(명)</span></div>
+      <div><b id="perCapita">–</b><span>1인당 예상 지급액</span></div>
+      <div><b id="premium">–</b><span>권장 보험료</span></div>
+      <div><b id="reported">–</b><span>실제 보고된 보험료</span></div>
+      <div><b id="optPremium">–</b><span>예산 맞춘 보험료</span></div>
     </div>
     <table id="budgetTable"></table>
     <div class="muted" id="popNote" style="margin-top:8px"></div>
-    <h2 style="margin-top:16px">⑥ 인구절벽 예산 투영 (2024→2034)</h2>
+    <div class="muted" style="margin-top:6px">
+      · <b>실제 보고된 보험료</b>는 지자체가 공개한 값이 있을 때만 표시됩니다(현재 경기도).<br>
+      · <b>예산 맞춘 보험료</b>는 위 <b>연간 예산</b>을 입력했을 때만 나옵니다(예산 없으면 전체보장이라 조정할 게 없음).
+    </div>
+
+    <h2 style="margin-top:20px">⑥ 인구 감소가 미래 예산에 미치는 영향</h2>
+    <div class="desc">복무할 20대 남성이 앞으로 <b>얼마나 줄어드는지</b>(파란 막대)와, 그에 따라 지자체가
+      내야 할 <b>총 보험료</b>가 어떻게 변하는지(노란 선)를 2024~2034년으로 보여줍니다.
+      인원이 줄면 총예산도 함께 줄어드는 흐름을 확인할 수 있습니다.</div>
     <canvas id="projChart"></canvas>
   </section>
 
   <section class="card full">
-    <h2>⑦ AI 모델 성능 검증 (2층: 집단 발생률 학습 + 개인 예측 음성결과)</h2>
+    <h2>⑦ AI 성능 검증 — 정직하게</h2>
+    <div class="desc">AI를 <b>두 갈래</b>로 나눠 씁니다. <b>(1) 지역별 발생률을 학습하는 모델</b> — 단순 계산보다
+      확실히 더 정확해서 채택했습니다. <b>(2) 개인의 사고를 맞히는 모델</b> — 공개 데이터로는 성능이
+      약합니다. 우리는 이 사실을 <b>숨기지 않고 그대로 공개</b>하고, 개인 예측·차별에는 쓰지 않습니다.
+      아래 표는 우리 모델을 항상 <b>단순 방식과 나란히</b> 비교한 결과입니다(숫자가 작을수록 정확).</div>
     <p class="muted" id="aiFraming"></p>
-    <h3>모듈 A — 셀 패널 발생률 GBM (공간·시간 CV, baseline 대비 정직 비교)</h3>
+    <h3>(1) 지역별 발생률 학습 모델 — 단순 방식과 정직 비교</h3>
     <div id="aiModuleA"></div>
-    <h3 style="margin-top:14px">M2 — 개인 손상위험 ML (정직한 음성결과)</h3>
+    <h3 style="margin-top:14px">(2) 개인 사고 예측 모델 — 약함을 그대로 보고</h3>
     <div class="metric">
-      <div><b id="m2auc">–</b><span>홀드아웃 AUC(로지스틱)</span></div>
-      <div><b id="m2base">–</b><span>베이스라인 AUC(age+sex)</span></div>
-      <div><b id="m2adopt">–</b><span>채택 모델</span></div>
+      <div><b id="m2auc">–</b><span>개인 예측 정확도 (0.5=찍기)</span></div>
+      <div><b id="m2base">–</b><span>나이·성별만 썼을 때</span></div>
+      <div><b id="m2adopt">–</b><span>최종 선택</span></div>
     </div>
     <div class="muted" id="m2note"></div>
   </section>
 
   <section class="card full">
-    <h2>⑧ M4 — 코호트 리스크 통합 (시도 20대남 행태 상대위험, 전국=1.0)</h2>
+    <h2>⑧ 지역별 종합 위험 지수</h2>
+    <div class="desc">각 지역 20대 남성의 생활습관을 종합해 <b>전국 평균(1.0)</b>과 비교한 위험 지수입니다.
+      막대가 1보다 크면(빨강) 전국 평균보다 위험이 높은 지역, 작으면(파랑) 낮은 지역입니다.</div>
     <p class="muted" id="m4Note"></p>
     <canvas id="cohortChart"></canvas>
     <div class="muted" id="m4Bmi" style="margin-top:8px"></div>
   </section>
 
   <section class="card full">
-    <h2>⑨ M5 — 계리 보험료 (순보험료 + 위험할증 + 사업비)</h2>
+    <h2>⑨ 보험료는 어떻게 계산되나</h2>
+    <div class="desc">실제 보험료를 <b>세 조각</b>으로 나눠 보여줍니다.
+      <b>순보험료</b>(예상 사고비용) + <b>위험할증</b>(예상보다 나쁠 때 대비한 여유분) +
+      <b>사업비</b>(운영비) = <b>총보험료</b>. 경기도 기준 1인당 <b>30,668원</b>으로,
+      실제 보고된 47,920원보다 낮습니다.</div>
     <div class="metric">
-      <div><b id="pmNet">–</b><span>순보험료/인</span></div>
-      <div><b id="pmRisk">–</b><span>위험할증/인(α=1)</span></div>
-      <div><b id="pmGross">–</b><span>총보험료/인</span></div>
-      <div><b id="pmReported">–</b><span>보고된 실제</span></div>
-      <div><b id="pmCV">–</b><span>변동계수 CV</span></div>
+      <div><b id="pmNet">–</b><span>순보험료 (예상 사고비용)</span></div>
+      <div><b id="pmRisk">–</b><span>위험할증 (대비 여유분)</span></div>
+      <div><b id="pmGross">–</b><span>총보험료 (1인당)</span></div>
+      <div><b id="pmReported">–</b><span>실제 보고된 보험료</span></div>
+      <div><b id="pmCV">–</b><span>지역별 편차(작을수록 안정)</span></div>
     </div>
     <table id="pmSens"></table>
     <div class="muted" id="pmNote" style="margin-top:8px"></div>
@@ -182,7 +229,7 @@ async function loadStratify(){
   document.getElementById("irr").textContent = fmt(st.irr,2) + "×";
   buildTable("stratTable",
     ["stratum","rate_severe_trauma","smoker","obese","binge_drink"],
-    ["층","중증외상율","흡연","비만","폭음"],
+    ["위험 그룹","사고 발생률","흡연율","비만율","폭음율"],
     st.rows, {rate_severe_trauma:3, smoker:3, obese:3, binge_drink:3});
 }
 
@@ -193,7 +240,7 @@ async function loadEco(){
   document.getElementById("ecoDev").textContent = fmt(eco.deviance_explained,3);
   buildTable("ecoTable",
     ["위험요인","IRR(SD당)","CI_lo","CI_hi","p"],
-    ["위험요인","IRR","CI low","CI high","p"], eco.rows, {});
+    ["생활습관","위험 배수","하한","상한","유의성(p)"], eco.rows, {});
 }
 
 // ④ LORO
@@ -229,19 +276,19 @@ async function loadSchedules(){
 async function renderCohort(){
   const d = await getJSON("/api/cohort");
   document.getElementById("m4Note").textContent =
-    `생태회귀 IRR(${d.predictors.join(", ")})을 시도 20대남 행태유병률에 적용 · ${d.n_regions}개 시도 · 집단 단위(개인 아님)`;
+    `각 지역 20대 남성의 생활습관(${d.predictors.join(", ")})을 종합해 전국 평균(1.0)과 비교 · ${d.n_regions}개 지역 · 지역 집단 단위(개인 예측 아님)`;
   const rows = d.risk_index;
   new Chart(document.getElementById("cohortChart"), {
     type:"bar",
     data:{ labels: rows.map(r=>r.sido), datasets:[{
-      label:"코호트 리스크 지수(전국=1.0)", data: rows.map(r=>r.risk_index),
+      label:"지역 위험 지수 (전국 평균=1.0)", data: rows.map(r=>r.risk_index),
       backgroundColor: rows.map(r=> r.risk_index>=1 ? "hsl(8 70% 55% / .85)" : "hsl(205 70% 55% / .85)") }] },
     options:{ scales:{ x:{ticks:{color:"#9fb0c0"}}, y:{ticks:{color:"#9fb0c0"}} },
       plugins:{ legend:{labels:{color:"#e8eef4"}} } }
   });
   const b = d.bmi_selection;
   document.getElementById("m4Bmi").textContent =
-    `현역 BMI≥25 ${(b.conscript_bmi_ge25*100).toFixed(1)}%(과체중+비만) vs 일반 20대남 ${(b.general_bmi_ge25*100).toFixed(1)}% · ${b.note}`;
+    `참고 — 현역 판정자의 과체중·비만(BMI≥25) 비율 ${(b.conscript_bmi_ge25*100).toFixed(1)}% vs 일반 20대 남성 ${(b.general_bmi_ge25*100).toFixed(1)}%`;
 }
 
 async function renderPremium(){
@@ -253,34 +300,34 @@ async function renderPremium(){
   document.getElementById("pmCV").textContent = fmt(p.cv,3);
   buildTable("pmSens",
     ["alpha","사업비15%","사업비20%","사업비30%"],
-    ["안전계수 α","사업비 15%","사업비 20%","사업비 30%"],
+    ["위험 대비 강도","운영비 15%일 때","운영비 20%일 때","운영비 30%일 때"],
     p.sensitivity, {alpha:2}, {"사업비15%":won,"사업비20%":won,"사업비30%":won});
-  document.getElementById("pmNote").textContent = "경기도 기준 · " + p.note + " | " + p.compare.note;
+  document.getElementById("pmNote").innerHTML =
+    "경기도 기준입니다. 위 표는 <b>운영비 비율과 위험 대비 강도</b>를 바꿨을 때 보험료가 어떻게 변하는지 보여줍니다.";
 }
 
 async function renderAI(){
   const ai = await getJSON("/api/ai_performance");
-  document.getElementById("aiFraming").textContent = ai.framing;
+  document.getElementById("aiFraming").textContent =
+    "핵심은 '상해(외인) 사망 — 확장 데이터'입니다. 여기서 AI 모델이 단순 방식보다 오차가 작아 채택했습니다.";
   let html = "";
   const labels = {
-    allcause:"전체사인 (2,890셀 · 방법론 검증)",
-    external_prior136:"외인 상해사망 — 이전 (20대남 136셀 · 2021–24)",
-    external:"외인 상해사망 — 확장 (666셀 · 2005–24, 주민등록+추계 분모)"};
+    allcause:"전체 사망 (방법 점검용)",
+    external_prior136:"상해(외인) 사망 — 이전 데이터 (2021~24)",
+    external:"상해(외인) 사망 — 확장 데이터 (2005~24) · 핵심"};
+  html += `<div class="muted" style="margin-bottom:6px">아래 두 오차 열은 <b>낮을수록 정확</b>합니다.
+    AI 모델(GBM)의 오차가 단순 방식보다 작으면 그만큼 더 정확하다는 뜻입니다.</div>`;
   for (const tgt of ["allcause","external_prior136","external"]){
     const m = ai.module_a[tgt]; if(!m) continue;
-    html += `<h4>타깃: ${labels[tgt]} — GBM 채택: <b>${m.adopt_gbm?"예 ✅":"아니오(baseline 유지)"}</b></h4>`;
-    html += `<table><tr><th>모델</th><th>공간CV deviance</th><th>공간 calib</th><th>시간CV deviance</th><th>시간 calib</th></tr>`;
-    for (const [mk,ml] of [["gbm","GBM(Poisson)"],["proportional","비례보정(백본)"],["simple_mean","단순평균(성·연령·연도)"]]){
+    html += `<h4>분석 대상: ${labels[tgt]} — AI 채택: <b>${m.adopt_gbm?"예 ✅":"아니오(단순식 유지)"}</b></h4>`;
+    html += `<table><tr><th>방식</th><th>지역 시험 오차</th><th>지역 보정</th><th>연도 시험 오차</th><th>연도 보정</th></tr>`;
+    for (const [mk,ml] of [["gbm","AI 모델(GBM)"],["proportional","단순 비례식"],["simple_mean","단순 평균"]]){
       html += `<tr><td>${ml}</td><td>${fmt(m.spatial[mk].deviance,3)}</td><td>${fmt(m.spatial[mk].calib_slope,2)}</td>`+
               `<td>${fmt(m.temporal[mk].deviance,3)}</td><td>${fmt(m.temporal[mk].calib_slope,2)}</td></tr>`;
     }
     html += `</table>`;
-    if (m.temporal_ex_switch){
-      const e = m.temporal_ex_switch.gbm;
-      html += `<div class="muted">시간CV 민감도(소스전환 2020 제외): GBM deviance ${fmt(e.deviance,3)}, calib ${fmt(e.calib_slope,2)} → 경계 불연속이 검증을 오염시키지 않음</div>`;
-    }
     const imp = m.importance.slice(0,4).map(r=>`${r.feature} ${fmt(r["gain%"],1)}%`).join(", ");
-    html += `<div class="muted">피처 중요도(gain): ${imp}<br>${m.note}</div>`;
+    html += `<div class="muted">AI가 크게 참고한 요인: ${imp}</div>`;
   }
   document.getElementById("aiModuleA").innerHTML = html;
   const m2 = ai.m2_individual;
@@ -291,47 +338,60 @@ async function renderAI(){
 }
 
 async function calcBudget(){
-  const schedule = document.getElementById("schedSel").value;
-  const body = { schedule };
-  const p = document.getElementById("popInput").value;
-  if (p) body.population = Number(p);
-  const b = document.getElementById("budgetInput").value;
-  if (b) body.annual_budget = Number(b);
-  const res = await getJSON("/api/budget", {
-    method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+  const btn = document.getElementById("calcBtn");
+  const status = document.getElementById("calcStatus");
+  btn.disabled = true;
+  status.innerHTML = "⏳ 계산 중입니다… (실시간 계산이라 최대 10초 걸릴 수 있어요)";
+  try {
+    const schedule = document.getElementById("schedSel").value;
+    const body = { schedule };
+    const p = document.getElementById("popInput").value;
+    if (p) body.population = Number(p);
+    const b = document.getElementById("budgetInput").value;
+    if (b) body.annual_budget = Number(b);
+    const res = await getJSON("/api/budget", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
 
-  document.getElementById("popOut").textContent = res.population.toLocaleString("ko-KR");
-  document.getElementById("perCapita").textContent = won(res.per_capita_claims);
-  document.getElementById("premium").textContent = won(res.premium_per_capita);
-  document.getElementById("reported").textContent = res.reported_premium ? won(res.reported_premium) : "–";
-  document.getElementById("optPremium").textContent =
-    res.optimization ? won(res.optimization.adjusted_premium_per_capita) : "–";
-  document.getElementById("popNote").textContent =
-    `현역 N 산출: ${res.population_source} · 보장은 '20대 남성 × ${res.sido}' 발생률 셀 기준 · 미매칭 항목 제외(하한)`;
+    document.getElementById("popOut").textContent = res.population.toLocaleString("ko-KR");
+    document.getElementById("perCapita").textContent = won(res.per_capita_claims);
+    document.getElementById("premium").textContent = won(res.premium_per_capita);
+    document.getElementById("reported").textContent = res.reported_premium ? won(res.reported_premium) : "–";
+    document.getElementById("optPremium").textContent =
+      res.optimization ? won(res.optimization.adjusted_premium_per_capita) : "–";
+    document.getElementById("popNote").textContent =
+      `복무 인원은 ${res.population_source}로 계산 · 보장은 '${res.sido} 20대 남성' 발생률 기준`;
 
-  const items = res.optimization ? res.optimization.by_item : res.by_item;
-  buildTable("budgetTable",
-    ["label","track","rate_per_1000py","expected_events","payout_per_event","expected_claims"],
-    ["보장항목","트랙","발생률(천명당)","기대건수","건당지급","기대청구액"],
-    items, {rate_per_1000py:3, expected_events:1},
-    {payout_per_event:won, expected_claims:won});
+    const items = res.optimization ? res.optimization.by_item : res.by_item;
+    buildTable("budgetTable",
+      ["label","track","rate_per_1000py","expected_events","payout_per_event","expected_claims"],
+      ["보장 항목","구분","발생률(1천명당)","예상 건수","건당 지급액","예상 총지급액"],
+      items, {rate_per_1000py:3, expected_events:1},
+      {payout_per_event:won, expected_claims:won});
 
-  // ⑥ 투영
-  const pop = await getJSON("/api/population?schedule="+encodeURIComponent(schedule));
-  const pr = pop.projection;
-  if (window._proj) window._proj.destroy();
-  window._proj = new Chart(document.getElementById("projChart"), {
-    data:{ labels: pr.map(r=>r.year), datasets:[
-      { type:"bar", label:"현역 N", data: pr.map(r=>r.population), yAxisID:"y",
-        backgroundColor:"#2d6fb0" },
-      { type:"line", label:"총 보험료(원)", data: pr.map(r=>r.total_premium), yAxisID:"y1",
-        borderColor:"#ffcc66", tension:.2 } ]},
-    options:{ scales:{
-      y:{position:"left",ticks:{color:"#9fb0c0"},title:{display:true,text:"현역 N",color:"#9fb0c0"}},
-      y1:{position:"right",grid:{drawOnChartArea:false},ticks:{color:"#9fb0c0"}},
-      x:{ticks:{color:"#9fb0c0"}} },
-      plugins:{ legend:{labels:{color:"#e8eef4"}} } }
-  });
+    // ⑥ 투영
+    const pop = await getJSON("/api/population?schedule="+encodeURIComponent(schedule));
+    const pr = pop.projection;
+    if (window._proj) window._proj.destroy();
+    window._proj = new Chart(document.getElementById("projChart"), {
+      data:{ labels: pr.map(r=>r.year), datasets:[
+        { type:"bar", label:"복무 인원(명)", data: pr.map(r=>r.population), yAxisID:"y",
+          order:2, backgroundColor:"rgba(45,111,176,0.55)" },
+        { type:"line", label:"총 보험료(원)", data: pr.map(r=>r.total_premium), yAxisID:"y1",
+          order:0, borderColor:"#ffcc66", backgroundColor:"#ffcc66", borderWidth:3,
+          pointRadius:4, pointBackgroundColor:"#ffcc66", tension:.2 } ]},
+      options:{ scales:{
+        y:{position:"left",ticks:{color:"#9fb0c0"},title:{display:true,text:"복무 인원(명)",color:"#9fb0c0"}},
+        y1:{position:"right",grid:{drawOnChartArea:false},ticks:{color:"#9fb0c0"},title:{display:true,text:"총 보험료(원)",color:"#ffcc66"}},
+        x:{ticks:{color:"#9fb0c0"}} },
+        plugins:{ legend:{labels:{color:"#e8eef4"}} } }
+    });
+    status.innerHTML = "✅ 계산 완료. 지자체를 바꾸거나 예산을 넣고 [계산]을 다시 눌러 보세요.";
+  } catch(e){
+    console.error(e);
+    status.innerHTML = "⚠️ 계산에 실패했습니다. 잠시 후 [계산]을 다시 눌러 주세요.";
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function buildTable(id, keys, heads, rows, round={}, fmtFn={}){
