@@ -7,7 +7,9 @@
 """
 from __future__ import annotations
 
+import json
 import math
+import os
 from functools import lru_cache
 
 from fastapi import FastAPI
@@ -24,6 +26,23 @@ from ..validation import ai_performance, military_proxy, report
 app = FastAPI(title="군복무 청년 상해보험 리스크·계리 대시보드")
 
 DASHBOARD = config.ROOT / "dashboard" / "index.html"
+
+# --- 스냅샷 서빙 ----------------------------------------------------------
+# 무거운 분석 엔드포인트(stratify·cohort·ai_performance 등)는 최대 RSS가 1GB를
+# 넘어 저사양 호스팅(예: 512MB)에서 OOM으로 실패한다. 모든 산출이 결정적이므로
+# scripts.build_snapshot이 만든 정적 JSON을 그대로 서빙한다(런타임 계산 없음).
+# DASHBOARD_SNAPSHOT 환경변수가 켜져 있고 파일이 있을 때만 활성화 — 로컬 개발·
+# 테스트는 env 미설정이라 기존처럼 라이브 계산한다.
+_SNAPSHOT: dict = {}
+if os.getenv("DASHBOARD_SNAPSHOT"):
+    _sp = config.ROOT / "dashboard" / "snapshot.json"
+    if _sp.exists():
+        _SNAPSHOT = json.loads(_sp.read_text(encoding="utf-8"))
+
+
+def _snap(key: str):
+    """스냅샷에 key가 있으면 반환, 없으면 None(→ 라이브 계산으로 폴백)."""
+    return _SNAPSHOT.get(key)
 
 
 def _clean(obj):
@@ -73,17 +92,21 @@ def index():
 
 @app.get("/api/meta")
 def meta():
-    return {"honesty_note": config.HONESTY_NOTE,
-            "coverage_items": {k: v["label"] for k, v in config.COVERAGE_ITEMS.items()}}
+    return _snap("/api/meta") or {
+        "honesty_note": config.HONESTY_NOTE,
+        "coverage_items": {k: v["label"] for k, v in config.COVERAGE_ITEMS.items()}}
 
 
 @app.get("/api/rates")
 def api_rates():
-    return {"note": config.HONESTY_NOTE, "rows": _records(_rate_table())}
+    return _snap("/api/rates") or {"note": config.HONESTY_NOTE,
+                                    "rows": _records(_rate_table())}
 
 
 @app.get("/api/ecological")
 def api_ecological():
+    if (s := _snap("/api/ecological")) is not None:
+        return s
     efit = _ecological()
     return {
         "n_obs": efit.n_obs,
@@ -94,12 +117,16 @@ def api_ecological():
 
 @app.get("/api/stratify")
 def api_stratify():
+    if (s := _snap("/api/stratify")) is not None:
+        return s
     st = _stratify()
     return {"irr": _clean(st["irr"]), "rows": _records(st["profile"])}
 
 
 @app.get("/api/validation")
 def api_validation():
+    if (s := _snap("/api/validation")) is not None:
+        return s
     val = _validation()
     return {"metrics": _to_jsonable(val["metrics"]),
             "rows": _records(val["predictions"])}
@@ -107,6 +134,8 @@ def api_validation():
 
 @app.get("/api/schedules")
 def api_schedules():
+    if (s := _snap("/api/schedules")) is not None:
+        return s
     out = []
     for name in benefits.list_schedules():
         sched = benefits.SCHEDULES[name]
@@ -119,11 +148,14 @@ def api_schedules():
 
 @app.get("/api/calibration")
 def api_calibration():
-    return {"rows": _records(calibration.calibration_factors())}
+    return _snap("/api/calibration") or {
+        "rows": _records(calibration.calibration_factors())}
 
 
 @app.get("/api/consistency")
 def api_consistency():
+    if (s := _snap("/api/consistency")) is not None:
+        return s
     con = report.disease_track_consistency()
     return {"coverage_le_all_death_ok": con["coverage_le_all_death_ok"],
             "disease_death_le_incidence_ok": con["disease_death_le_incidence_ok"],
@@ -134,6 +166,8 @@ def api_consistency():
 @app.get("/api/military_validation")
 def api_military_validation():
     """군 코호트 proxy 타당성 검증(국방부 사망사고 통계). pricing 미변경 — 정직성/검증용."""
+    if (snap := _snap("/api/military_validation")) is not None:
+        return snap
     s = military_proxy.suicide_adjustment()
     e = military_proxy.external_crossvalidation()
     return _clean({
@@ -185,7 +219,7 @@ def _ai_performance():
 
 @app.get("/api/ai_performance")
 def api_ai_performance():
-    return _ai_performance()
+    return _snap("/api/ai_performance") or _ai_performance()
 
 
 @lru_cache(maxsize=1)
@@ -208,7 +242,7 @@ def _ai_artifacts():
 
 @app.get("/api/ai_artifacts")
 def api_ai_artifacts():
-    return _ai_artifacts()
+    return _snap("/api/ai_artifacts") or _ai_artifacts()
 
 
 @lru_cache(maxsize=1)
@@ -223,13 +257,17 @@ def _cohort():
 @app.get("/api/cohort")
 def api_cohort():
     """M4 — 코호트 리스크 지수 + 현역 BMI 선택 + 생태회귀 IRR 출처."""
-    return _cohort()
+    return _snap("/api/cohort") or _cohort()
 
 
 @app.get("/api/premium")
 def api_premium(schedule: str = "경기도", alpha: float = premium.DEFAULT_ALPHA,
                 expense_ratio: float = premium.DEFAULT_EXPENSE_RATIO):
     """M5 — 계리 보험료(순+위험할증+사업비) + 보고치/단순할증 대조."""
+    if (schedule == "경기도" and alpha == premium.DEFAULT_ALPHA
+            and expense_ratio == premium.DEFAULT_EXPENSE_RATIO
+            and (s := _snap("/api/premium|경기도")) is not None):
+        return s
     pr = premium.actuarial_premium(schedule, alpha=alpha, expense_ratio=expense_ratio)
     return {
         "schedule": pr.schedule, "sido": pr.sido, "population": pr.population,

@@ -137,12 +137,32 @@
 const won = n => n==null ? "–" : "₩" + Math.round(n).toLocaleString("ko-KR");
 const fmt = (n,d=2) => n==null ? "–" : Number(n).toFixed(d);
 async function getJSON(u, opt){ const r = await fetch(u, opt); return r.json(); }
+// 카드별 독립 실행 — 한 엔드포인트가 실패해도 나머지 카드는 정상 렌더.
+async function safe(label, fn){
+  try { await fn(); }
+  catch(e){ console.error(`[${label}] 로드 실패:`, e); }
+}
 
 async function init(){
-  const meta = await getJSON("/api/meta");
-  document.getElementById("note").textContent = meta.honesty_note;
+  await safe("meta", async ()=>{
+    const meta = await getJSON("/api/meta");
+    document.getElementById("note").textContent = meta.honesty_note;
+  });
 
-  // ① 발생률
+  // 각 카드를 서로 독립적으로 병렬 로드(순차 체인 아님)
+  safe("rates", loadRates);
+  safe("stratify", loadStratify);
+  safe("ecological", loadEco);
+  safe("validation", loadValidation);
+  await safe("schedules", loadSchedules);   // ⑤ 셀렉터 채운 뒤 계산
+  safe("budget", ()=>calcBudget());
+  safe("ai", renderAI);
+  safe("cohort", renderCohort);
+  safe("premium", renderPremium);
+}
+
+// ① 발생률
+async function loadRates(){
   const rt = await getJSON("/api/rates");
   const cols = Object.keys(rt.rows[0]).filter(k => k !== "sido");
   const sidos = rt.rows.map(r => r.sido);
@@ -154,24 +174,30 @@ async function init(){
     options:{ responsive:true, scales:{ x:{ticks:{color:"#9fb0c0"}}, y:{ticks:{color:"#9fb0c0"}} },
               plugins:{ legend:{labels:{color:"#e8eef4"}} } }
   });
+}
 
-  // ② 층화
+// ② 층화
+async function loadStratify(){
   const st = await getJSON("/api/stratify");
   document.getElementById("irr").textContent = fmt(st.irr,2) + "×";
   buildTable("stratTable",
     ["stratum","rate_severe_trauma","smoker","obese","binge_drink"],
     ["층","중증외상율","흡연","비만","폭음"],
     st.rows, {rate_severe_trauma:3, smoker:3, obese:3, binge_drink:3});
+}
 
-  // ③ 생태회귀
+// ③ 생태회귀
+async function loadEco(){
   const eco = await getJSON("/api/ecological");
   document.getElementById("ecoN").textContent = eco.n_obs;
   document.getElementById("ecoDev").textContent = fmt(eco.deviance_explained,3);
   buildTable("ecoTable",
     ["위험요인","IRR(SD당)","CI_lo","CI_hi","p"],
     ["위험요인","IRR","CI low","CI high","p"], eco.rows, {});
+}
 
-  // ④ LORO
+// ④ LORO
+async function loadValidation(){
   const val = await getJSON("/api/validation");
   document.getElementById("maeModel").textContent = fmt(val.metrics.model.mae,2);
   document.getElementById("maeBase").textContent = fmt(val.metrics.baseline.mae,2);
@@ -189,17 +215,15 @@ async function init(){
                        y:{title:{display:true,text:"관측",color:"#9fb0c0"},ticks:{color:"#9fb0c0"}} },
               plugins:{ legend:{labels:{color:"#e8eef4"}} } }
   });
+}
 
-  // ⑤ 예산
+// ⑤ 예산 셀렉터
+async function loadSchedules(){
   const sc = await getJSON("/api/schedules");
   const sel = document.getElementById("schedSel");
   sc.schedules.forEach(s => { const o=document.createElement("option");
     o.value=s.name; o.textContent=`${s.name} (${s.sido})`; sel.appendChild(o); });
   document.getElementById("calcBtn").onclick = calcBudget;
-  calcBudget();
-  renderAI();
-  renderCohort();
-  renderPremium();
 }
 
 async function renderCohort(){
