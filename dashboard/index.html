@@ -65,25 +65,29 @@
 
   <section class="card">
     <h2>② 지역을 위험도로 나누기</h2>
-    <div class="desc">지역을 건강 상태에 따라 <b>위험이 높은 곳 / 낮은 곳</b>으로 묶었습니다.
-      옆의 <b>위험배수</b>가 3.95라면, 고위험 지역이 저위험 지역보다 약 <b>4배</b> 위험하다는 뜻입니다.
-      개인을 예측하는 게 아니라 지역 집단을 나눈 것입니다.</div>
-    <div class="metric"><div><b id="irr">–</b><span>고위험 ÷ 저위험 (위험배수)</span></div></div>
+    <div class="desc">전국 지역을 건강 상태에 따라 <b>위험이 높은 그룹 / 낮은 그룹</b>으로 묶었습니다.
+      옆의 숫자 <b>3.95배</b>는 임의로 정한 게 아니라, <b>고위험 그룹의 실제 사고 발생률을 저위험
+      그룹으로 나눈 실측값</b>입니다 — 고위험 지역이 저위험 지역보다 약 4배 더 자주 다친다는 뜻이죠.
+      (아래 ③과는 별개의 지표입니다.)</div>
+    <div class="metric"><div><b id="irr">–</b><span>고위험 그룹 ÷ 저위험 그룹 (실제 발생률 비)</span></div></div>
     <table id="stratTable"></table>
-    <div class="muted" style="margin-top:8px">고위험으로 묶인 지역일수록 흡연·비만 비율이 높습니다.</div>
+    <div class="muted" style="margin-top:8px">고위험으로 묶인 지역일수록 흡연·비만 비율이 높게 나타납니다.</div>
   </section>
 
   <section class="card">
     <h2>③ 어떤 생활습관이 위험을 키우나</h2>
     <div class="desc">흡연·음주·비만 같은 지역 건강습관이 사고·질병과 얼마나 연결되는지 봅니다.
-      값이 <b>1보다 크면</b> 그 습관이 많은 지역일수록 위험도 높다는 뜻입니다.
+      표의 <b>발생률 배수</b>는 그 습관이 <b>한 단계(1 표준편차) 흔해질 때 발생률이 몇 배가 되는지</b>를
+      뜻합니다 — 1보다 크면 위험을 키우고, 1보다 작으면 낮춥니다. 예를 들어 흡연 1.40은
+      흡연율이 높은 지역일수록 사고·질병이 약 1.4배 많다는 의미입니다.
       (지역 단위 분석이라 개인의 인과관계로 단정하진 않습니다.)</div>
     <div class="metric">
       <div><b id="ecoN">–</b><span>분석한 지역 수</span></div>
-      <div><b id="ecoDev">–</b><span>설명력(높을수록 잘 설명)</span></div>
+      <div><b id="ecoDev">–</b><span>모델 적합도 (0~1, 높을수록 잘 맞음)</span></div>
     </div>
     <table id="ecoTable"></table>
-    <div class="muted" style="margin-top:8px">지역이 17곳뿐이라, 통계적으로 확실한 건 흡연입니다.</div>
+    <div class="muted" style="margin-top:8px">지역이 17곳뿐이라 표본이 작아, 통계적으로 뚜렷한 건 흡연입니다
+      (유의성 p가 0.05보다 작음).</div>
   </section>
 
   <section class="card">
@@ -116,16 +120,24 @@
     <div class="tip" id="calcStatus">⏳ 이 칸(⑤·⑥)은 실시간 계산이라 <b>5~10초</b> 걸릴 수 있습니다. 잠시만 기다려 주세요.</div>
     <div class="metric">
       <div><b id="popOut">–</b><span>복무 인원(명)</span></div>
-      <div><b id="perCapita">–</b><span>1인당 예상 지급액</span></div>
-      <div><b id="premium">–</b><span>권장 보험료</span></div>
+      <div><b id="perCapita">–</b><span>1인당 예상 사고비용(순수)</span></div>
+      <div><b id="premium">–</b><span>권장 보험료(전체보장·고정)</span></div>
       <div><b id="reported">–</b><span>실제 보고된 보험료</span></div>
       <div><b id="optPremium">–</b><span>예산 맞춘 보험료</span></div>
     </div>
     <table id="budgetTable"></table>
     <div class="muted" id="popNote" style="margin-top:8px"></div>
-    <div class="muted" style="margin-top:6px">
-      · <b>실제 보고된 보험료</b>는 지자체가 공개한 값이 있을 때만 표시됩니다(현재 경기도).<br>
-      · <b>예산 맞춘 보험료</b>는 위 <b>연간 예산</b>을 입력했을 때만 나옵니다(예산 없으면 전체보장이라 조정할 게 없음).
+    <div class="desc" style="margin-top:10px; border-left-color:var(--warn)">
+      <b>이 숫자들, 이렇게 읽으세요</b><br>
+      · <b>1인당 예상 사고비용</b> = 한 해 예상되는 사고 지급액을 인원으로 나눈 값(순수 원가).
+        보험료는 여기에 위험 여유분과 운영비를 더하므로 <b>항상 이보다 큽니다</b>.<br>
+      · <b>권장 보험료</b> = 모든 항목을 전부 보장할 때 필요한 보험료. <b>예산과 무관하게 고정</b>입니다.<br>
+      · <b>예산 맞춘 보험료</b> = 입력한 <b>연간 예산</b>으로 살 수 있는 보장 수준의 보험료.
+        예산이 넉넉하면 권장 보험료와 같아지고, <b>예산이 적으면 보장을 줄이므로 더 낮아집니다</b>
+        (예산이 줄었는데 보험료가 오르는 게 아니라, 보장 범위가 줄어드는 구조입니다).<br>
+      · 예산이 빠듯하면 <b>생명·중대 장해(상해사망·후유장해)를 먼저 지키고</b>, 골절·입원 같은
+        경미한 항목의 보장 비율부터 낮춥니다. 표에서 <b>0%는 "이 예산으론 아직 못 넣는 항목"</b>이라는 뜻입니다.<br>
+      · <b>실제 보고된 보험료</b>는 지자체가 공개한 값이 있을 때만 표시됩니다(현재 경기도 47,920원).
     </div>
 
     <h2 style="margin-top:20px">⑥ 인구 감소가 미래 예산에 미치는 영향</h2>
@@ -143,6 +155,17 @@
       아래 표는 우리 모델을 항상 <b>단순 방식과 나란히</b> 비교한 결과입니다(숫자가 작을수록 정확).</div>
     <p class="muted" id="aiFraming"></p>
     <h3>(1) 지역별 발생률 학습 모델 — 단순 방식과 정직 비교</h3>
+    <div class="desc">
+      <b>무엇을 시험했나</b> — AI가 처음 보는 상황도 잘 맞히는지 두 가지로 시험했습니다.<br>
+      · <b>지역 시험</b>: 한 지역을 <b>일부러 빼고</b> 나머지로 학습한 뒤, 빼둔 지역을 맞혀 봅니다
+        (다른 지역에도 통하는가?).<br>
+      · <b>연도 시험</b>: <b>과거로만</b> 학습한 뒤 최근 연도를 맞혀 봅니다(미래에도 통하는가?).<br>
+      <b>표 보는 법</b> — <b>시험 오차</b>는 예측이 실제와 얼마나 어긋났나로, <b>낮을수록 정확</b>합니다.
+        <b>보정</b>은 예측의 눈금이 실제와 맞는 정도로, <b>1에 가까울수록</b> 좋습니다.
+        <b>단순 비례식·단순 평균</b>은 AI 없이 계산하는 <b>비교 기준</b>입니다.<br>
+      <b>결론</b> — 핵심 대상(상해 사망)에서 <b>AI 모델의 오차가 두 시험 모두 단순 방식보다 작아</b>,
+        AI를 채택했습니다. 반대로 성능이 더 낫지 않으면 단순 방식을 그대로 씁니다(억지로 AI를 쓰지 않음).
+    </div>
     <div id="aiModuleA"></div>
     <h3 style="margin-top:14px">(2) 개인 사고 예측 모델 — 약함을 그대로 보고</h3>
     <div class="metric">
@@ -174,6 +197,13 @@
       <div><b id="pmGross">–</b><span>총보험료 (1인당)</span></div>
       <div><b id="pmReported">–</b><span>실제 보고된 보험료</span></div>
       <div><b id="pmCV">–</b><span>지역별 편차(작을수록 안정)</span></div>
+    </div>
+    <div class="desc" style="margin-top:4px">
+      <b>아래 표는 "가정을 바꾸면 보험료가 얼마나 달라지나"를 보여줍니다.</b><br>
+      · <b>위험 대비 강도</b> — 실제 사고가 예상보다 나쁠 때를 대비해 얹는 <b>여유분의 크기</b>입니다.
+        값이 클수록 더 보수적(안전)이며 보험료도 올라갑니다.<br>
+      · <b>운영비 15·20·30%</b> — 보험사가 상품을 굴리는 데 드는 비용 비율을 <b>세 가지로 가정</b>한 것입니다.
+        운영비를 높게 잡을수록 보험료가 올라갑니다. 실제 계약 조건에 맞춰 골라 보면 됩니다.
     </div>
     <table id="pmSens"></table>
     <div class="muted" id="pmNote" style="margin-top:8px"></div>
@@ -234,13 +264,16 @@ async function loadStratify(){
 }
 
 // ③ 생태회귀
+const RISK_KO = {smoker:"흡연", binge_drink:"폭음", phys_inactive:"운동 부족",
+                 obese:"비만", drink:"음주", hypertension:"고혈압"};
 async function loadEco(){
   const eco = await getJSON("/api/ecological");
   document.getElementById("ecoN").textContent = eco.n_obs;
   document.getElementById("ecoDev").textContent = fmt(eco.deviance_explained,3);
+  const rows = eco.rows.map(r => ({...r, 위험요인: RISK_KO[r.위험요인] || r.위험요인}));
   buildTable("ecoTable",
     ["위험요인","IRR(SD당)","CI_lo","CI_hi","p"],
-    ["생활습관","위험 배수","하한","상한","유의성(p)"], eco.rows, {});
+    ["생활습관","발생률 배수","하한","상한","유의성(p)"], rows, {});
 }
 
 // ④ LORO
@@ -302,8 +335,7 @@ async function renderPremium(){
     ["alpha","사업비15%","사업비20%","사업비30%"],
     ["위험 대비 강도","운영비 15%일 때","운영비 20%일 때","운영비 30%일 때"],
     p.sensitivity, {alpha:2}, {"사업비15%":won,"사업비20%":won,"사업비30%":won});
-  document.getElementById("pmNote").innerHTML =
-    "경기도 기준입니다. 위 표는 <b>운영비 비율과 위험 대비 강도</b>를 바꿨을 때 보험료가 어떻게 변하는지 보여줍니다.";
+  document.getElementById("pmNote").textContent = "표는 경기도 기준입니다.";
 }
 
 async function renderAI(){
@@ -361,12 +393,16 @@ async function calcBudget(){
     document.getElementById("popNote").textContent =
       `복무 인원은 ${res.population_source}로 계산 · 보장은 '${res.sido} 20대 남성' 발생률 기준`;
 
-    const items = res.optimization ? res.optimization.by_item : res.by_item;
+    const cov = res.optimization ? res.optimization.coverage_scale : null;
+    const items = (res.optimization ? res.optimization.by_item : res.by_item)
+      .map(r => ({...r, _cov: cov ? (cov[r.coverage_item] ?? 0) : 1}));
+    const covPct = v => v==null ? "–" : (v>=0.999 ? "100%"
+                   : v<=0.0001 ? "0% (미포함)" : (v*100).toFixed(0)+"%");
     buildTable("budgetTable",
-      ["label","track","rate_per_1000py","expected_events","payout_per_event","expected_claims"],
-      ["보장 항목","구분","발생률(1천명당)","예상 건수","건당 지급액","예상 총지급액"],
+      ["label","track","_cov","rate_per_1000py","expected_events","payout_per_event","expected_claims"],
+      ["보장 항목","구분","보장 비율","발생률(1천명당)","예상 건수","건당 지급액","예상 총지급액"],
       items, {rate_per_1000py:3, expected_events:1},
-      {payout_per_event:won, expected_claims:won});
+      {payout_per_event:won, expected_claims:won, _cov:covPct});
 
     // ⑥ 투영
     const pop = await getJSON("/api/population?schedule="+encodeURIComponent(schedule));
