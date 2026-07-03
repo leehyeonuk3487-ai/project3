@@ -9,8 +9,6 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
-      # 무거운 분석 엔드포인트를 정적 스냅샷(dashboard/snapshot.json)으로 서빙 →
-      # 512MB 무료 티어에서 OOM/타임아웃 없이 즉시 응답. 스냅샷은 커밋되어 있고
-      # 결정적이라 배포 시 재계산 불필요. 갱신: python -m scripts.build_snapshot
-      - key: DASHBOARD_SNAPSHOT
-        value: "1"
+      # 무거운 분석 엔드포인트는 정적 스냅샷(dashboard/snapshot.json)으로 서빙되어
+      # 512MB 무료 티어에서 OOM/타임아웃 없이 즉시 응답한다. 스냅샷은 커밋되어 있고
+      # 파일 존재만으로 자동 활성화(별도 env 불필요). 갱신: python -m scripts.build_snapshot

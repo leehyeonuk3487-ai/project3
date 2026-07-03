@@ -18,10 +18,14 @@ from pydantic import BaseModel
 
 from .. import config
 from ..data import benefits
-from ..models import (calibration, cell_panel, cohort, ecological, injury_ml,
-                      population, rates, stratify)
 from ..optimize import budget, premium
-from ..validation import ai_performance, military_proxy, report
+
+# 무거운 모듈(lightgbm/statsmodels/sklearn 의존: cell_panel·injury_ml·ecological·
+# stratify·cohort·report·ai_performance·calibration·military_proxy·rates)은 여기서
+# import하지 않는다 — 각각 +140~150MB라 스냅샷 모드에선 순수 낭비다. 이들을 쓰는
+# 엔드포인트는 전부 스냅샷으로 서빙되므로, 라이브 폴백이 필요한 함수 안에서만
+# 지연 import한다(아래). 이렇게 하면 기본 상주 메모리가 ~177MB → ~65MB로 줄어
+# 저사양·다중워커 호스팅에서도 OOM을 피한다. budget·premium·benefits만 상단 유지.
 
 app = FastAPI(title="군복무 청년 상해보험 리스크·계리 대시보드")
 
@@ -31,10 +35,13 @@ DASHBOARD = config.ROOT / "dashboard" / "index.html"
 # 무거운 분석 엔드포인트(stratify·cohort·ai_performance 등)는 최대 RSS가 1GB를
 # 넘어 저사양 호스팅(예: 512MB)에서 OOM으로 실패한다. 모든 산출이 결정적이므로
 # scripts.build_snapshot이 만든 정적 JSON을 그대로 서빙한다(런타임 계산 없음).
-# DASHBOARD_SNAPSHOT 환경변수가 켜져 있고 파일이 있을 때만 활성화 — 로컬 개발·
-# 테스트는 env 미설정이라 기존처럼 라이브 계산한다.
+#
+# 활성 조건: snapshot.json이 존재하면 자동 활성(환경변수 설정 불필요) — 호스팅을
+# 대시보드에서 수동 생성하면 render.yaml env가 적용되지 않아 OOM이 재발하므로,
+# 파일 존재만으로 켠다. 개발 중 라이브 계산을 원하면 DASHBOARD_LIVE=1로 끈다.
+# (스냅샷 빌더는 자기 자신을 읽지 않도록 DASHBOARD_LIVE=1을 설정하고 실행한다.)
 _SNAPSHOT: dict = {}
-if os.getenv("DASHBOARD_SNAPSHOT"):
+if not os.getenv("DASHBOARD_LIVE"):
     _sp = config.ROOT / "dashboard" / "snapshot.json"
     if _sp.exists():
         _SNAPSHOT = json.loads(_sp.read_text(encoding="utf-8"))
@@ -63,21 +70,25 @@ def _records(df, reset_index=True):
 
 @lru_cache(maxsize=1)
 def _rate_table():
+    from ..models import rates
     return rates.conscript_rate_table()
 
 
 @lru_cache(maxsize=1)
 def _ecological():
+    from ..models import ecological
     return ecological.fit()
 
 
 @lru_cache(maxsize=1)
 def _stratify():
+    from ..models import stratify
     return stratify.stratify()
 
 
 @lru_cache(maxsize=1)
 def _validation():
+    from ..validation import report
     return report.loro_calibration()
 
 
@@ -107,6 +118,7 @@ def api_rates():
 def api_ecological():
     if (s := _snap("/api/ecological")) is not None:
         return s
+    from ..models import ecological
     efit = _ecological()
     return {
         "n_obs": efit.n_obs,
@@ -148,14 +160,17 @@ def api_schedules():
 
 @app.get("/api/calibration")
 def api_calibration():
-    return _snap("/api/calibration") or {
-        "rows": _records(calibration.calibration_factors())}
+    if (s := _snap("/api/calibration")) is not None:
+        return s
+    from ..models import calibration
+    return {"rows": _records(calibration.calibration_factors())}
 
 
 @app.get("/api/consistency")
 def api_consistency():
     if (s := _snap("/api/consistency")) is not None:
         return s
+    from ..validation import report
     con = report.disease_track_consistency()
     return {"coverage_le_all_death_ok": con["coverage_le_all_death_ok"],
             "disease_death_le_incidence_ok": con["disease_death_le_incidence_ok"],
@@ -168,6 +183,7 @@ def api_military_validation():
     """군 코호트 proxy 타당성 검증(국방부 사망사고 통계). pricing 미변경 — 정직성/검증용."""
     if (snap := _snap("/api/military_validation")) is not None:
         return snap
+    from ..validation import military_proxy
     s = military_proxy.suicide_adjustment()
     e = military_proxy.external_crossvalidation()
     return _clean({
@@ -197,6 +213,7 @@ def _module_a_dict(r):
 @lru_cache(maxsize=1)
 def _ai_performance():
     """AI 성능 2층: 모듈 A(집단 셀 발생률 학습·공간시간CV) + M2(개인 손상 ML, 음성결과)."""
+    from ..models import cell_panel, injury_ml
     mods = {
         "allcause": _module_a_dict(cell_panel.evaluate("allcause")),
         "external": _module_a_dict(cell_panel.evaluate("external")),           # 2005–2024 확장
@@ -225,6 +242,7 @@ def api_ai_performance():
 @lru_cache(maxsize=1)
 def _ai_artifacts():
     """외인 GBM 검증 아티팩트: CV deviance·OOS 캘리브레이션·CHS ablation·예측구간·효율성."""
+    from ..validation import ai_performance
     cvd = ai_performance.cv_deviance_comparison()
     cal = ai_performance.calibration_reliability()
     return {
@@ -247,6 +265,7 @@ def api_ai_artifacts():
 
 @lru_cache(maxsize=1)
 def _cohort():
+    from ..models import cohort
     s = cohort.summary()
     return {"risk_index": _records(s["risk_index_table"]),
             "bmi_selection": {k: _clean(v) for k, v in s["bmi_selection"].items()},

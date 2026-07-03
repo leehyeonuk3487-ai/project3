@@ -10,9 +10,14 @@ from __future__ import annotations
 
 import json
 import math
+import os
 
-from src import config
-from src.api import main
+# 빌더는 반드시 라이브 계산해야 한다 — 기존 snapshot.json을 다시 읽어 그대로
+# 재저장하면 갱신이 안 되므로, main 임포트 전에 스냅샷 로딩을 끈다.
+os.environ["DASHBOARD_LIVE"] = "1"
+
+from src import config          # noqa: E402
+from src.api import main        # noqa: E402
 
 
 def _sanitize(o):
