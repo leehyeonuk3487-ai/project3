@@ -162,6 +162,8 @@
       · <b>연도 시험</b>: <b>과거로만</b> 학습한 뒤 최근 연도를 맞혀 봅니다(미래에도 통하는가?).<br>
       <b>표 보는 법</b> — <b>시험 오차</b>는 예측이 실제와 얼마나 어긋났나로, <b>낮을수록 정확</b>합니다.
         <b>보정</b>은 예측의 눈금이 실제와 맞는 정도로, <b>1에 가까울수록</b> 좋습니다.
+        보정이 <b>0.5~2.0 범위를 벗어나면(⚠️)</b> 데이터가 적어 예측이 불안정하다는 뜻이라,
+        그 AI는 <b>믿을 수 없다고 보고 자동으로 쓰지 않습니다</b>(단순식 유지).
         <b>단순 비례식·단순 평균</b>은 AI 없이 계산하는 <b>비교 기준</b>입니다.<br>
       <b>결론</b> — 핵심 대상(상해 사망)에서 <b>AI 모델의 오차가 두 시험 모두 단순 방식보다 작아</b>,
         AI를 채택했습니다. 반대로 성능이 더 낫지 않으면 단순 방식을 그대로 씁니다(억지로 AI를 쓰지 않음).
@@ -213,6 +215,9 @@
 <script>
 const won = n => n==null ? "–" : "₩" + Math.round(n).toLocaleString("ko-KR");
 const fmt = (n,d=2) => n==null ? "–" : Number(n).toFixed(d);
+// 보정 기울기: 안전범위(0.5~2.0) 밖이면 ⚠️로 표시(불안정한 소표본 신호)
+const calib = v => { if(v==null) return "–"; const s=Number(v).toFixed(2);
+  return (v<0.5||v>2.0) ? `<span style="color:#ffcc66">${s} ⚠️</span>` : s; };
 async function getJSON(u, opt){ const r = await fetch(u, opt); return r.json(); }
 // 카드별 독립 실행 — 한 엔드포인트가 실패해도 나머지 카드는 정상 렌더.
 async function safe(label, fn){
@@ -354,10 +359,18 @@ async function renderAI(){
     html += `<h4>분석 대상: ${labels[tgt]} — AI 채택: <b>${m.adopt_gbm?"예 ✅":"아니오(단순식 유지)"}</b></h4>`;
     html += `<table><tr><th>방식</th><th>지역 시험 오차</th><th>지역 보정</th><th>연도 시험 오차</th><th>연도 보정</th></tr>`;
     for (const [mk,ml] of [["gbm","AI 모델(GBM)"],["proportional","단순 비례식"],["simple_mean","단순 평균"]]){
-      html += `<tr><td>${ml}</td><td>${fmt(m.spatial[mk].deviance,3)}</td><td>${fmt(m.spatial[mk].calib_slope,2)}</td>`+
-              `<td>${fmt(m.temporal[mk].deviance,3)}</td><td>${fmt(m.temporal[mk].calib_slope,2)}</td></tr>`;
+      html += `<tr><td>${ml}</td><td>${fmt(m.spatial[mk].deviance,3)}</td><td>${calib(m.spatial[mk].calib_slope)}</td>`+
+              `<td>${fmt(m.temporal[mk].deviance,3)}</td><td>${calib(m.temporal[mk].calib_slope)}</td></tr>`;
     }
     html += `</table>`;
+    // 보정이 0.5~2.0 범위를 벗어난 GBM이 있으면 왜 기각했는지 설명
+    const gt = m.temporal.gbm.calib_slope, gs = m.spatial.gbm.calib_slope;
+    if ((gt<0.5||gt>2.0||gs<0.5||gs>2.0) && !m.adopt_gbm){
+      html += `<div class="tip">⚠️ 이 경우 AI의 보정 값이 안전 범위(0.5~2.0)를 벗어났습니다.
+        데이터가 적어(연도 시험은 2년치로만 학습) 예측이 지나치게 평평해진 것으로,
+        오류가 아니라 <b>"이 AI는 못 믿는다"는 신호</b>입니다. 그래서 시스템이 자동으로
+        AI를 쓰지 않고 단순식을 유지했습니다.</div>`;
+    }
     const imp = m.importance.slice(0,4).map(r=>`${r.feature} ${fmt(r["gain%"],1)}%`).join(", ");
     html += `<div class="muted">AI가 크게 참고한 요인: ${imp}</div>`;
   }
