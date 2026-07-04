@@ -520,7 +520,7 @@ def test_m7_report_renders_all_required_sections():
     assert "기여" in md and "0.991" in md
     # ★가중 목적함수 + 동률 정직 공개 + 가정흔들기 증거 + 역산 안 함
     assert "가중" in md and "머릿수" in md
-    assert "같음" in md and "거꾸로 맞춰" in md       # 조작 차단 투명성
+    assert "같다" in md and "거꾸로 맞춰" in md       # 조작 차단 투명성
     assert "가정을 흔드" in md                        # 민감도 증거
     # ★군 대리지표 검증(국방부) 섹션
     assert "대리지표의 타당성 검증" in md
