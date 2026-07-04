@@ -508,25 +508,23 @@ def test_m7_report_renders_all_required_sections():
     # 정직성·한계 / 윤리·미션 / 데이터 출처·라이선스
     assert "정직성·한계" in md and "윤리" in md
     assert "미션" in md and "더 많은 장병이 더 많은 혜택" in md
-    assert "개인" in md and "스코어링 금지" in md          # 개인 차등 아님
+    assert "개인" in md and "차등하지 않는다" in md         # 개인 차등 아님
     assert "라이선스" in md and "공공누리" in md
-    # ★pricing 불변 + 외삽 미래한정 원칙이 리포트에 박혀 있어야 함
-    assert "M0 직접관측 백본" in md
-    assert "구조변화" in md and "미반영" in md             # 외삽 한계 노트
-    # 2층 AI 검증 + 베이스라인 정직 비교
-    assert "baseline 채택" in md and "0.565" in md
-    # ★AI 성능 아티팩트(A+B): CV deviance 감소·OOS 캘리브레이션·ablation·예측구간·효율성
-    assert "deviance" in md and "캘리브레이션" in md
-    assert "ablation" in md and "예측구간" in md
-    assert "0.991" in md and "linprog" in md
-    # ★복지가중 목적함수 + 동률 정직 공개 + 섭동 증거 + 역산 안 함
-    assert "복지가중" in md and "머릿수" in md
-    assert "동률" in md and "역산" in md            # 조작 차단 투명성
-    assert "섭동" in md                             # Option5 증거
-    # ★군 코호트 proxy 검증(국방부) 섹션
-    assert "군 코호트 proxy 타당성 검증" in md
+    # ★보험료 산정은 실측 고정 + 미래 외삽은 시나리오 한정
+    assert "실측 데이터" in md and "현재 가격에는 넣지 않는다" in md
+    assert "반영되지 않는다" in md                          # 외삽 한계 노트
+    # 2단 AI 검증 + 단순식 정직 비교
+    assert "단순식" in md and "0.565" in md
+    # ★AI 성능 아티팩트: 예측오차 감소·보정·요인 기여·예측범위·최적화 속도
+    assert "보정" in md and "예측 범위" in md
+    assert "기여" in md and "0.991" in md
+    # ★가중 목적함수 + 동률 정직 공개 + 가정흔들기 증거 + 역산 안 함
+    assert "가중" in md and "머릿수" in md
+    assert "같음" in md and "거꾸로 맞춰" in md       # 조작 차단 투명성
+    assert "가정을 흔드" in md                        # 민감도 증거
+    # ★군 대리지표 검증(국방부) 섹션
+    assert "대리지표의 타당성 검증" in md
     assert "국방부" in md and "면책" in md
-    assert "pricing" in md.lower() or "M0 직접관측" in md   # 미주입 명시
 
 
 def test_m7_collect_keys_and_pricing_invariant():
